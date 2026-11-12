@@ -29,32 +29,24 @@ sh container-autoupdate.sh --help                       # 全部选项
 
 ## 安装（DPanel 计划任务）
 
-DPanel 里新建计划任务，脚本框整段填下面这段（按小时跑，执行超时 600 秒）：
+DPanel 里新建计划任务，脚本框填两行（按小时跑，执行超时 600 秒），把 `--compose myapp` 换成你的目标：
 
 ```sh
 G=https://github.com/geekMus/container-autoupdate/releases/latest/download/container-autoupdate.sh
-SRC='https://gh-proxy.com
-https://ghfast.top
-https://github.com'
-T=/tmp/ct-new.sh
-okfile() { [ -f "$1" ] || return 1; [ "$(wc -c <"$1")" -gt 1000 ] && sh -n "$1" 2>/dev/null && grep -q container-autoupdate "$1"; }
-for u in $SRC; do
-  case "$u" in "https://github.com") url=$G ;; *) url="$u/$G" ;; esac
-  curl -fsSL --max-time 30 "$url" -o "$T" 2>/dev/null || continue
-  okfile "$T" && break
-done
-if okfile "$T"; then
-  mv -f "$T" /tmp/container-autoupdate.sh
-else
-  echo "WARN 三个源都没拿到可用的脚本，沿用上一轮的副本"
-fi
-[ -s /tmp/container-autoupdate.sh ] || { echo "ERR 拿不到可用的更新脚本，也没有上一轮的副本" >&2; exit 1; }
-sh /tmp/container-autoupdate.sh --compose myapp
+curl -fsSL --max-time 30 "$G" -o /tmp/container-autoupdate.sh && sh /tmp/container-autoupdate.sh --compose myapp
 ```
 
-`SRC` 一行一个源，按顺序试，**内容合格才算成功**（`okfile` 会挡掉返回 HTML 的镜像站）。
+抓不到官方地址（网络不稳、镜像站返回 HTML）时，改用 [`../retry/container-autoupdate-install.sh`](../retry/container-autoupdate-install.sh)：它轮流试几个源，内容合格才用，全失败就沿用上一轮副本。
 
 ## 退出码
 
 - `0` 更新成功或本来就没有新版本
 - 非 `0` 失败，原因同时写到 stderr（计划任务失败时只收 stderr）
+
+需要“失败了再试几次”的场景，用 [`../retry/retry.sh`](../retry/retry.sh) 包一层：`sh retry.sh -n 3 -- sh container-autoupdate.sh --compose myapp`。
+
+## Compose 分支的旧镜像回收
+
+`docker compose pull` 会把 `<仓库>:<标签>` 搬到新镜像上，旧镜像丢掉最后一个标签但层还留在磁盘；`up -d` 重建容器后，旧镜像连最后的引用也没了。脚本在更新成功后做一次回收，只删**本项目、已无标签、无容器引用**的镜像，避免每更新一次就永久沉淀一个镜像。
+
+代价是不保留回滚点：Compose 模式回退只能把 compose 文件里的 tag 改回旧版本再 `up -d`。容器模式的回滚点由 DPanel 负责。

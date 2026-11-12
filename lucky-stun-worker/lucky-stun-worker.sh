@@ -11,7 +11,7 @@
 #
 # 依赖：容器内只要 sh + curl + grep（Lucky 官方镜像自带）。
 # 超时：Lucky 对每轮脚本有 15 秒硬超时，超时直接 SIGKILL（日志：signal: killed）；
-#       本脚本最多 11 秒，留 4 秒余量。
+#       本脚本只做一次部署（约 3 秒），需要重试请用 retry/ 里的入口脚本。
 # ============================================================================
 
 # ------------------------------- 需要你改 -------------------------------
@@ -211,33 +211,20 @@ EOF
 )
 
 # ============================================================================
-# 部署 Worker（最多 3 次；Lucky 的硬超时是 15 秒，这里最坏 11 秒）
+# 部署 Worker（单次；要重试用 retry/ 里的入口脚本）
 # ============================================================================
 
-DEPLOY_OK=0
-TRY=1
-while [ "${TRY}" -le 3 ]; do
-    RESULT=$(curl -s --connect-timeout 2 --max-time 3 -X PUT \
-        "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
-        -H "Authorization: Bearer ${CF_WORKER_API_TOKEN}" \
-        -H "Content-Type: application/javascript" \
-        --data "${WORKER_CODE}")
+RESULT=$(curl -s --connect-timeout 2 --max-time 3 -X PUT \
+    "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+    -H "Authorization: Bearer ${CF_WORKER_API_TOKEN}" \
+    -H "Content-Type: application/javascript" \
+    --data "${WORKER_CODE}")
 
-    if echo "${RESULT}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-        DEPLOY_OK=1
-        break
-    fi
-
-    if [ "${TRY}" -lt 3 ]; then
-        echo "⚠️ 第 ${TRY} 次部署失败，1 秒后重试"
-        sleep 1
-    fi
-    TRY=$((TRY + 1))
-done
-
-if [ "${DEPLOY_OK}" -eq 1 ]; then
+if echo "${RESULT}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
     echo "✅ Worker 部署成功（${V4_PORT}）"
-else
-    echo "❌ Worker 部署失败"
-    echo "${RESULT}"
+    exit 0
 fi
+
+echo "❌ Worker 部署失败"
+echo "${RESULT}"
+exit 1

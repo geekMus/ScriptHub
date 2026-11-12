@@ -4,31 +4,19 @@ Lucky 的 STUN 穿透打出新端口后，把新端口写进 Cloudflare Worker �
 
 **运行位置**：Lucky 容器内部，由 Lucky 自己调用（STUN 规则 → 编辑 → 脚本/Webhook）。不依赖宿主机、不依赖任何外挂守护进程。
 
-## 为什么需要它
+## 它解决什么问题
 
-家里的宽带是双层 NAT（光猫 + 小米路由），公网 IPv4 端口每次重拨都换。玩法是：
+家里宽带是双层 NAT（光猫 + 小米路由），公网 IPv4 端口每次重拨都换。玩法是：
 
 ```
-浏览器  https://<名字>.mus.pp.ua        ← Cloudflare 上的 Worker 路由
+浏览器  https://<名字>.mus.pp.ua        ← Cloudflare 上 Worker 的路由
    │
    ├─ Worker 307 → https://<名字>.rt.mus.pp.ua:<当前打洞端口>
    │
    └─ rt.mus.pp.ua 是 DNS only 记录，直接指回公网 IP
 ```
 
-所以 Worker 里必须存着**当前**的打洞端口。Lucky 只要端口变了就会调用这段脚本。
-
-## 为什么内置重试
-
-Lucky 对每轮脚本有 **15 秒硬超时**，超时就 `SIGKILL`，日志里是：
-
-```
-调用脚本失败：signal: killed
-```
-
-而运营商重拨的那几秒，容器到 `api.cloudflare.com` 的连接会被拖住（实测直接超时 15 秒）。Lucky 不会重试，Worker 就停在旧端口——外网表现为“端口能 ping 通但访问不了”。
-
-脚本因此把部署改成最多 3 次，每次 `--connect-timeout 2 --max-time 3`、间隔 1 秒：最坏 **3+1+3+1+3 = 11 秒**，留 4 秒余量。
+所以 Worker 里必须存着**当前**的打洞端口。Lucky 一发现端口变了就会调用这段脚本。
 
 ## 配置
 
@@ -56,21 +44,29 @@ Lucky 对每轮脚本有 **15 秒硬超时**，超时就 `SIGKILL`，日志里�
 ## 用法
 
 1. Cloudflare 上建好 Worker（可以先拿 `worker.js` 手工部署一次）；
-2. Lucky → STUN 穿透 → 规则 → 编辑 → 脚本/Webhook，把 `lucky-stun-worker.sh` 整段粘进去，填好四个配置；
+2. Lucky → STUN 穿透 → 规则 → 编辑 → 脚本/Webhook，把 **`lucky-stun-worker.sh` 整段**粘进去，填好四个配置；
 3. 保存后重启一次 Lucky，确认日志出现 `✅ Worker 部署成功（<端口>）`；
 4. 用外部探测（例如 check-host.net 的 TCP 检测）验证 `公网IP:<端口>` 能连上。
+
+脚本只部署一次，成功打印 `✅`、退出码 0，失败打印 `❌` + API 原始响应、退出码 1。
+
+### 需要重试怎么办
+
+不要改这个脚本。用 [`../retry/lucky-stun-worker-retry.sh`](../retry/lucky-stun-worker-retry.sh)：把基础脚本放进容器（`/root/lucky/conf/` → `/app/conf/`），入口脚本负责重试调用它。
+
+Lucky 对每轮脚本有 **15 秒硬超时**，超时就 `SIGKILL`（日志里是 `调用脚本失败：signal: killed`），所以重试也必须卡在这个窗口里，见 retry 目录的说明。
 
 ## 故障排查
 
 | 现象 | 原因 | 处置 |
 | --- | --- | --- |
-| `调用脚本失败：signal: killed` | 15 秒超时 | 看是不是刚重拨；重试补丁已内置，仍失败就手动跑一次 |
+| `调用脚本失败：signal: killed` | 15 秒超时 | 多半是刚重拨；手动跑一次，或换 retry 入口 |
 | `❌ Worker 部署失败` + `{"success":false,...}` | Token 权限/过期，或容器出不了网 | 容器里 `curl https://api.cloudflare.com/client/v4/user/tokens/verify` 看返回 |
 | Worker 端口一直不变 | 脚本没被触发（端口没变）或脚本失败 | 看 Lucky 日志里的“公网地址已变化”与脚本输出 |
 | 端口对、外面还是连不上 | 打洞没成 / 最外层 NAT 又改了一次端口 | `check-host.net/check-tcp` 测；再看路由器 UPnP 表里的外部端口 |
 
 ## 已知限制
 
-- 只在端口变化时触发；失败的这一轮不会补，Worker 会停在旧端口直到下次变化。
+- 只在端口变化时触发；失败的那一轮不会自动补，Worker 会停在旧端口直到下次变化（或手动补一次）。
 - 双层 NAT 下，光猫那层可能再改一次端口（本地端口 ≠ 路由器映射端口 ≠ 公网端口），Worker 里要写的是**公网端口**。
 - 如果 `rt.mus.pp.ua` 在 Cloudflare 上没有任何记录，Worker 的 307 目标根本解析不了——端口再对也不行。

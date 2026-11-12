@@ -1,66 +1,96 @@
 #!/bin/sh
 # ============================================================================
-# Lucky STUN → Cloudflare Worker 端口同步脚本
+# lucky-stun-worker —— 把打洞端口部署进 Cloudflare Worker 的单文件脚本
 #
-# 用途：Lucky 的 STUN 穿透规则在公网端口变化后调用本脚本，把新端口写进
-#       已经部署好的 Cloudflare Worker，让 <名字>.<主域名> 的 307 跳转
-#       始终指向当前可用的端口。
+# 它自己不带任何配置：需要的值全部从命令行参数（或同名环境变量）拿。
 #
-# 用法：Lucky → STUN 穿透 → 规则 → 编辑 → “脚本/Webhook”整段粘贴本文件，
-#       只需改下面四个空值。Lucky 会把 ${port} 替换成本次打洞的公网端口。
+# 用法：
+#   lucky-stun-worker.sh --token <TOKEN> --account <ACCOUNT_ID> \
+#                        --domain <主域名> --suffix <跳转后缀> \
+#                        --port <打洞端口> [--worker stun-redirect] \
+#                        [--v6-suffix <后缀>] [--v6-port 100] [--dry-run]
 #
-# 依赖：容器内只要 sh + curl + grep（Lucky 官方镜像自带）。
-# 超时：Lucky 对每轮脚本有 15 秒硬超时，超时直接 SIGKILL（日志：signal: killed）；
-#       本脚本只做一次部署（约 3 秒），需要重试请用 retry/ 里的入口脚本。
+# 参数（括号里是等价环境变量，命令行优先）：
+#   --token        CF_WORKER_API_TOKEN   Cloudflare API Token（Workers Scripts:Edit）
+#   --account      CF_ACCOUNT_ID         账户 ID
+#   --domain       BASE_DOMAIN           主域名
+#   --suffix       V4_SUFFIX             IPv4 跳转后缀
+#   --port         port                  打洞得到的公网端口
+#   --worker       WORKER_NAME           Worker 名称（默认 stun-redirect）
+#   --v6-suffix    V6_SUFFIX             IPv6 后缀（默认同 --suffix）
+#   --v6-port      V6_PORT               IPv6 端口（默认 100）
+#   --dry-run                            只打印解析结果，不部署
+#
+# 在 Lucky 里用：把本文件放进容器（例如 /root/lucky/conf/ 挂载到 /app/conf/），
+# 脚本框只写一行调用，端口用 Lucky 的 ${port} 占位符：
+#   sh /app/conf/lucky-stun-worker.sh --token "..." --account "..." \
+#      --domain "mus.pp.ua" --suffix "rt.mus.pp.ua" --port "${port}"
+#
+# 退出码：成功 0；参数缺失、部署失败 1。
 # ============================================================================
 
-# ------------------------------- 需要你改 -------------------------------
-# Cloudflare API Token（权限：Workers Scripts:Edit，建议只授权这一个账号）
-CF_WORKER_API_TOKEN=""
-# Cloudflare 账户 ID
-CF_ACCOUNT_ID=""
-# 主域名（Worker 的路由挂在 *.<主域名> 上）
-BASE_DOMAIN=""
-# 跳转目标的后缀（例如 rt.mus.pp.ua）
-V4_SUFFIX=""
-# ------------------------------------------------------------------------
+TOKEN="${CF_WORKER_API_TOKEN:-}"
+ACCOUNT="${CF_ACCOUNT_ID:-}"
+DOMAIN="${BASE_DOMAIN:-}"
+SUFFIX="${V4_SUFFIX:-}"
+V6S="${V6_SUFFIX:-}"
+V6P="${V6_PORT:-100}"
+WORKER="${WORKER_NAME:-stun-redirect}"
+DRY_RUN=0
 
-# Worker 名称，和 Cloudflare 上的脚本名一致即可
-WORKER_NAME="stun-redirect"
+# Lucky 调用时会把 ${port} 整个替换成实际端口；命令行用 --port 覆盖
+PORT="${port}"
 
-# 端口：IPv4 由 Lucky 注入，不要手填；IPv6 固定 100
-V4_PORT="${port}"
-V6_SUFFIX="${V4_SUFFIX}"
-V6_PORT=100
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --token)     TOKEN="$2"; shift 2 ;;
+        --account)   ACCOUNT="$2"; shift 2 ;;
+        --domain)    DOMAIN="$2"; shift 2 ;;
+        --suffix)    SUFFIX="$2"; shift 2 ;;
+        --port)      PORT="$2"; shift 2 ;;
+        --worker)    WORKER="$2"; shift 2 ;;
+        --v6-suffix) V6S="$2"; shift 2 ;;
+        --v6-port)   V6P="$2"; shift 2 ;;
+        --dry-run)   DRY_RUN=1; shift ;;
+        -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+        *) echo "未知参数：$1（--help 看用法）" >&2; exit 1 ;;
+    esac
+done
 
-# ------------------------------- 前置检查 -------------------------------
-# 填错配置会部署出一个坏 Worker，宁可早退
-if [ -z "${CF_WORKER_API_TOKEN}" ] || [ -z "${CF_ACCOUNT_ID}" ] || \
-   [ -z "${BASE_DOMAIN}" ] || [ -z "${V4_SUFFIX}" ]; then
-    echo "❌ 配置不完整：请先填 CF_WORKER_API_TOKEN / CF_ACCOUNT_ID / BASE_DOMAIN / V4_SUFFIX"
+[ -n "${V6S}" ] || V6S="${SUFFIX}"
+
+# ------------------------------- 校验 -------------------------------
+MISSING=""
+[ -n "${TOKEN}" ]   || MISSING="${MISSING} token"
+[ -n "${ACCOUNT}" ] || MISSING="${MISSING} account"
+[ -n "${DOMAIN}" ]  || MISSING="${MISSING} domain"
+[ -n "${SUFFIX}" ]  || MISSING="${MISSING} suffix"
+[ -n "${PORT}" ]    || MISSING="${MISSING} port"
+
+if [ -n "${MISSING}" ]; then
+    echo "❌ 缺少参数：${MISSING}" >&2
+    echo "   用法：$0 --token ... --account ... --domain ... --suffix ... --port ..." >&2
     exit 1
 fi
 
-# 手动测试时 ${port} 为空，不能把 0 部署上去
-if [ -z "${V4_PORT}" ] || [ "${V4_PORT}" = "0" ]; then
-    echo "❌ 没有拿到打洞端口（\${port} 为空）——通常是规则还没打通就触发了脚本"
-    exit 1
-fi
+case "${PORT}" in
+    ''|*[!0-9]*|0) echo "❌ --port 不是合法端口：${PORT}" >&2; exit 1 ;;
+esac
 
 # ============================================================================
-# Worker 代码（整份覆盖部署，端口用上面的变量注入）
+# Worker 代码（整份覆盖部署，端口等用上面的变量注入）
 # ============================================================================
 
 WORKER_CODE=$(cat <<EOF
 const CONFIG = {
-    baseDomain: '${BASE_DOMAIN}',
+    baseDomain: '${DOMAIN}',
     ipv4: {
-        suffix: '${V4_SUFFIX}',
-        port: ${V4_PORT}
+        suffix: '${SUFFIX}',
+        port: ${PORT}
     },
     ipv6: {
-        suffix: '${V6_SUFFIX}',
-        port: ${V6_PORT}
+        suffix: '${V6S}',
+        port: ${V6P}
     }
 };
 
@@ -210,18 +240,34 @@ function createErrorResponse(error, request) {
 EOF
 )
 
+if [ "${DRY_RUN}" -eq 1 ]; then
+    echo "worker   : ${WORKER}"
+    echo "domain   : ${DOMAIN}"
+    echo "ipv4     : ${SUFFIX}:${PORT}"
+    echo "ipv6     : ${V6S}:${V6P}"
+    echo "code size: $(printf '%s' "${WORKER_CODE}" | wc -c) bytes"
+    exit 0
+fi
+
 # ============================================================================
-# 部署 Worker（单次；要重试用 retry/ 里的入口脚本）
+# 部署 Worker（单次；需要重试请用 retry/retry.sh 包一层）
 # ============================================================================
 
-RESULT=$(curl -s --connect-timeout 2 --max-time 3 -X PUT \
-    "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
-    -H "Authorization: Bearer ${CF_WORKER_API_TOKEN}" \
+RESULT=$(curl -sS --connect-timeout 2 --max-time 5 -X PUT \
+    "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/scripts/${WORKER}" \
+    -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/javascript" \
-    --data "${WORKER_CODE}")
+    --data "${WORKER_CODE}" 2>&1)
+CURL_RC=$?
+
+if [ "${CURL_RC}" -ne 0 ]; then
+    echo "❌ 请求失败（curl 退出码 ${CURL_RC}）：连不上 api.cloudflare.com 或超时"
+    echo "${RESULT}"
+    exit 1
+fi
 
 if echo "${RESULT}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo "✅ Worker 部署成功（${V4_PORT}）"
+    echo "✅ Worker 部署成功（${SUFFIX}:${PORT}）"
     exit 0
 fi
 

@@ -8,25 +8,25 @@
 | --- | --- | --- |
 | 让容器 / Compose 项目自动更新 | [container-autoupdate/](./container-autoupdate/) | `sh container-autoupdate.sh --compose myapp` |
 | 把自动更新装进 DPanel 计划任务 | [container-autoupdate/](./container-autoupdate/) | 粘 README 里“安装”那段 |
-| Lucky 打洞换端口后自动改 Worker | [lucky-stun-worker/](./lucky-stun-worker/) | 整段粘进 Lucky 的脚本/Webhook 框 |
+| Lucky 打洞换端口后自动改 Worker | [lucky-stun-worker/](./lucky-stun-worker/) | `sh lucky-stun-worker.sh --token ... --port 5267` |
 | 上面这些失败了想自动再试几次 | [retry/](./retry/) | `sh retry.sh -n 3 -- <命令>` |
-| 网络不稳，要换个源再抓 | [retry/](./retry/) | `container-autoupdate-install.sh` |
+| 要重试的脚本还在网上 | [retry/](./retry/) | `sh retry.sh -n 3 -u <URL> -- <参数...>` |
 
 ## 目录
 
 | 目录 | 干什么 | 跑在哪 |
 | --- | --- | --- |
 | [container-autoupdate](./container-autoupdate/) | 给 DPanel 计划任务用的容器 / Compose 自动更新脚本 | DPanel 容器内 |
-| [lucky-stun-worker](./lucky-stun-worker/) | Lucky STUN 打洞端口变化时，把新端口写进 Cloudflare Worker | Lucky 容器内（由 Lucky 调用） |
-| [retry](./retry/) | 带重试 / 带回退的**入口脚本**，负责调用上面的基础脚本 | 哪儿都行 |
+| [lucky-stun-worker](./lucky-stun-worker/) | 把打洞端口部署进 Cloudflare Worker（纯参数化，无配置） | 哪儿都行，常用在 Lucky 容器内 |
+| [retry](./retry/) | 通用重试入口：重跑命令，或下载远程脚本再重跑 | 哪儿都行 |
 
 ## 为什么重试单独放
 
 基础脚本只做一件事：跑一次，用**退出码**说明成败。推荐用法就是直接跑它——逻辑短、看得懂、出错时错误信息就是原始错误。
 
-“失败了再试几次”是另一件事，和业务无关。与其在每个脚本里各写一份重试循环，不如放到 [retry/](./retry/) 里，用统一的入口去调用基础脚本：`retry.sh -n 3 -- sh 基础脚本`。这样基础脚本永远保持干净，重试策略可以随时换（次数、间隔、是否静默），也不用改业务代码。
+“失败了再试几次”是另一件事，和业务无关。与其在每个脚本里各写一份重试循环，不如放到 [retry/](./retry/) 里，用统一的入口去调用：`retry.sh -n 3 -- sh 基础脚本`，或者 `retry.sh -u <URL> -- <参数...>` 直接重试一个网上的脚本。这样基础脚本永远保持干净，重试策略可以随时换（次数、间隔、是否静默），也不用改业务代码。
 
-Lucky 是个例外：它的脚本框只能粘一段文本，引用不了外部文件，所以 `retry/lucky-stun-worker-retry.sh` 的做法是“基础脚本放容器里，入口去调它”。
+Lucky 的脚本框只能粘一段文本、传不了参数，所以 [lucky-stun-worker](./lucky-stun-worker/) 的做法是：脚本本身纯参数化，Lucky 里只粘**一行调用**（端口用 Lucky 的 `${port}` 占位符）。
 
 ## 背景
 

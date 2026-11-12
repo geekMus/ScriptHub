@@ -1,37 +1,54 @@
 # retry
 
-带重试 / 带回退的**入口脚本**。这里不放业务逻辑，只负责把 `../` 里的基础脚本多跑几次。
+通用重试入口。整个目录只有**一个文件**，它自己不干任何业务：要跑什么、参数是什么，全部从命令行传进来。
 
-基础脚本本身保持“跑一次、干净退出码”，推荐用法就是直接跑它；只有确实需要重试时，才用这里的入口去**调用**它。
+基础脚本保持“跑一次、用退出码说话”，需要重试就在外面套这一层——这样重试策略（跑几次、隔多久、静不静默）随时能换，不用改业务代码。
 
-| 入口 | 给谁用 | 调用谁 |
-| --- | --- | --- |
-| `retry.sh` | 任何脚本（cron、DPanel 计划任务、手动） | 任意命令，失败重试 |
-| `lucky-stun-worker-retry.sh` | Lucky 的“脚本/Webhook”框 | `/app/conf/lucky-stun-worker.sh` |
-| `container-autoupdate-install.sh` | DPanel 计划任务（网络不稳） | 下载后运行 `container-autoupdate.sh` |
+## 两种用法
 
-## retry.sh —— 通用
+### 1. 重试一条本地命令
 
 ```sh
 sh retry.sh -n 3 -i 2 -- sh ../container-autoupdate/container-autoupdate.sh --compose myapp
+sh retry.sh -n 5 -- sh /opt/scripts/backup.sh /data
 ```
 
-- `-n` 最多几次（默认 3），`-i` 间隔秒数（默认 2），`-q` 少打印
-- 判定标准只看**退出码**：0 就算成功，非 0 才重试
-- 退出码 = 最后一次的退出码
+### 2. 重试一个远程脚本（每轮重新下载）
 
-## lucky-stun-worker-retry.sh —— Lucky 专用
+```sh
+sh retry.sh -n 3 -u https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh \
+  -- --token "$CF_WORKER_API_TOKEN" --account "$CF_ACCOUNT_ID" \
+     --domain mus.pp.ua --suffix rt.mus.pp.ua --port 5267
+```
 
-Lucky 的脚本框只能粘一段文本，没法引用外部文件，所以这里的入口是：先让基础脚本待在容器里，入口再去调它。
+`-u` 后面的参数会原样传给被下载的脚本；每轮都会重新下载（下载失败也算这一轮失败），下载后先做“非空 + `sh -n` 语法检查”再执行。
 
-1. 把 [`../lucky-stun-worker/lucky-stun-worker.sh`](../lucky-stun-worker/lucky-stun-worker.sh) 放到宿主机的 `/root/lucky/conf/`（该目录已挂载到容器 `/app/conf/`）；
-2. 基础脚本里的四个配置照常填；
-3. Lucky → STUN 穿透 → 规则 → 编辑 → 脚本/Webhook，粘**本入口**的整段。
+## 参数
 
-时长要卡在 Lucky 的 15 秒硬超时以内：基础脚本单次最长 3 秒，3 次 + 2 秒间隔 = 最坏 11 秒。
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `-n` | 3 | 最多尝试几次 |
+| `-i` | 2 | 两次之间等几秒 |
+| `-q` | 关 | 安静模式，不打印进度 |
+| `-u` / `--url` | 空 | 远程脚本地址；给了它就走“下载后执行”模式 |
 
-## container-autoupdate-install.sh —— DPanel 计划任务
+判定只看**退出码**：0 即成功，非 0 才重试。最终退出码 = 最后一次执行（或下载/校验）的退出码；参数错误返回 2。
 
-推荐的安装方式是从官方地址直接抓（见 [`../container-autoupdate/README.md`](../container-autoupdate/README.md)）。这个入口多做一层镜像回退：三个源轮流试，`sh -n` + 体积 + 内容关键字都合格才用，全失败就沿用上一轮副本。
+## 在 Lucky 里用
 
-计划任务里整段粘进去，末尾把 `--compose myapp` 换成你的目标。
+Lucky 的脚本框只能粘一段文本，所以把 `retry.sh` 和基础脚本一起放进容器（宿主机 `/root/lucky/conf/` → 容器 `/app/conf/`），然后粘一行：
+
+```sh
+sh /app/conf/retry.sh -n 3 -i 1 -- sh /app/conf/lucky-stun-worker.sh \
+  --token "..." --account "..." --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
+```
+
+Lucky 对每轮脚本有 **15 秒硬超时**，所以次数和间隔要留余量：基础脚本单次最长约 5 秒，3 次 + 1 秒间隔 ≈ 17 秒——超了就把 `-n` 降到 2，或把 `-i` 设成 0。
+
+## 退出码速查
+
+| 场景 | 退出码 |
+| --- | --- |
+| 成功 | 0 |
+| 全部尝试都失败 | 最后一次的退出码 |
+| 参数写错 / 没给命令 | 2 |

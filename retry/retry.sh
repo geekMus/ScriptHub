@@ -1,50 +1,96 @@
 #!/bin/sh
 # ============================================================================
-# retry.sh —— 通用重试入口：失败（非 0 退出码）就再跑一次
+# retry.sh —— 通用重试：失败（非 0 退出码）就再跑一次
 #
-# 它自己不干活，只负责“把你的脚本多跑几次”。基础脚本保持单次执行、干净退出码，
-# 需要重试的场景在外面套这一层。
+# 它自己不干活，只负责“把你给的命令多跑几次”。要跑什么、参数是什么，全部由
+# 命令行传进来；基础脚本保持单次执行、干净退出码，需要重试就在外面套这一层。
 #
 # 用法：
-#   sh retry.sh [-n 次数] [-i 间隔秒] [-q] -- 命令 [参数...]
+#   retry.sh [-n 次数] [-i 间隔秒] [-q] -- <命令> [参数...]
+#   retry.sh [-n 次数] [-i 间隔秒] [-q] -u <URL> [--] [参数...]
+#
+#   -n  最多尝试几次（默认 3）
+#   -i  两次之间等几秒（默认 2）
+#   -q  安静模式，不打印进度
+#   -u  远程脚本地址：每轮先下载到临时文件、校验非空且语法正确，再用 sh 执行，
+#       后面的参数原样传给该脚本（下载失败也算这一轮失败）
 #
 # 例子：
-#   sh retry.sh -n 3 -i 2 -- sh ../container-autoupdate/container-autoupdate.sh --compose myapp
-#   sh retry.sh -n 3 -- sh /opt/scripts/backup.sh
+#   sh retry.sh -n 3 -- sh ./lucky-stun-worker.sh --token "$TOKEN" --port 5267
+#   sh retry.sh -n 3 -u https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh \
+#      -- --token "$TOKEN" --account "$ACCOUNT" --domain mus.pp.ua --suffix rt.mus.pp.ua --port 5267
 #
-# 退出码：最后一次命令的退出码（成功即 0）。
+# 退出码：最后一次执行（或下载）的退出码；成功即 0，参数错误 2。
 # ============================================================================
 
 N=3
 I=2
 QUIET=0
+URL=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -n) N="$2"; shift 2 ;;
         -i) I="$2"; shift 2 ;;
         -q) QUIET=1; shift ;;
+        -u|--url) URL="$2"; shift 2; break ;;
         --) shift; break ;;
-        *)  break ;;
+        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+        *) break ;;
     esac
 done
-
-if [ $# -eq 0 ]; then
-    echo "用法: sh retry.sh [-n 次数] [-i 间隔秒] [-q] -- 命令 [参数...]" >&2
-    exit 2
-fi
 
 case "${N}" in ''|*[!0-9]*) echo "retry.sh: -n 需要正整数" >&2; exit 2 ;; esac
 [ "${N}" -ge 1 ] || { echo "retry.sh: -n 至少为 1" >&2; exit 2; }
 
+case "${I}" in ''|*[!0-9]*) echo "retry.sh: -i 需要非负整数" >&2; exit 2 ;; esac
+
+# -u 之后允许再写一个 -- 作为“以下是给目标脚本的参数”的分隔符，剥掉它
+if [ -n "${URL}" ] && [ "${1:-}" = "--" ]; then
+    shift
+fi
+
+if [ -z "${URL}" ] && [ $# -eq 0 ]; then
+    echo "用法: retry.sh [-n 次数] [-i 间隔] [-q] -- <命令> [参数...]" >&2
+    echo "      retry.sh [-n 次数] [-i 间隔] [-q] -u <URL> [--] [参数...]" >&2
+    exit 2
+fi
+
+say() { [ "${QUIET}" -eq 1 ] || echo "$*" >&2; }
+
 T=1
 while :; do
-    [ "${QUIET}" -eq 1 ] || echo "▶ 第 ${T}/${N} 次: $*" >&2
-    "$@"
-    RC=$?
+    if [ -n "${URL}" ]; then
+        say "▶ 第 ${T}/${N} 次: 下载 ${URL}"
+        TMP=$(mktemp 2>/dev/null || echo "/tmp/retry.$$")
+        RC=1
+        if curl -fsSL --connect-timeout 5 --max-time 30 "${URL}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
+            if sh -n "${TMP}" 2>/dev/null; then
+                RC=0
+            else
+                say "✖ 下载到的脚本语法有误"
+                RC=1
+            fi
+        else
+            say "✖ 下载失败"
+            RC=1
+        fi
+
+        if [ "${RC}" -eq 0 ]; then
+            say "▶ 执行: sh ${TMP} $*"
+            sh "${TMP}" "$@"
+            RC=$?
+        fi
+        rm -f "${TMP}" 2>/dev/null
+    else
+        say "▶ 第 ${T}/${N} 次: $*"
+        "$@"
+        RC=$?
+    fi
+
     [ "${RC}" -eq 0 ] && exit 0
     [ "${T}" -ge "${N}" ] && break
-    [ "${QUIET}" -eq 1 ] || echo "✖ 退出码 ${RC}，${I} 秒后重试" >&2
+    say "✖ 退出码 ${RC}，${I} 秒后重试"
     sleep "${I}"
     T=$((T + 1))
 done

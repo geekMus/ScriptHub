@@ -398,6 +398,9 @@ budget_timeout() {
 dp_timeout() { budget_timeout "$1"; }
 
 check_deps() {
+  # 还没指定目标时先不查依赖：主流程马上会报「必须且只能指定一个目标」，
+  # 那才是用户真正要处理的问题；这时先报「缺少 docker」只会把人带偏。
+  [ -z "${_GOAL:-}" ] && return 0
   _missing=""
   for _b in timeout sed awk grep; do
     command -v "$_b" >/dev/null 2>&1 || _missing="$_missing $_b"
@@ -436,9 +439,6 @@ check_deps() {
     fi
     return 0
   fi
-  # 还没指定目标时不必检查 DPanel：下面的主流程会直接报「必须且只能指定一个目标」，
-  # 那才是用户真正要处理的问题。
-  [ -z "$_GOAL" ] && return 0
   # 容器分支：DPanel CLI 必须可用，所有更新动作都靠它。
   _dv=$(dp_cli "$(dp_timeout "$DP_T_CHECK")" version | sed -n 's/^version: *//p' | head -n1)
   if [ -z "$_dv" ]; then

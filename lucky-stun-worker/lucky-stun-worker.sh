@@ -85,8 +85,19 @@ if [ -n "${MISSING}" ]; then
 fi
 
 case "${PORT}" in
-    ''|*[!0-9]*|0) echo "❌ --port 不是合法端口：${PORT}" >&2; exit 1 ;;
+    ''|*[!0-9]*) echo "❌ --port 不是合法端口：${PORT}" >&2; exit 1 ;;
 esac
+if [ "${PORT}" -lt 1 ] || [ "${PORT}" -gt 65535 ]; then
+    echo "❌ --port 超出范围（1-65535）：${PORT}" >&2
+    exit 1
+fi
+case "${V6P}" in
+    ''|*[!0-9]*) echo "❌ --v6-port 不是合法端口：${V6P}" >&2; exit 1 ;;
+esac
+if [ "${V6P}" -lt 1 ] || [ "${V6P}" -gt 65535 ]; then
+    echo "❌ --v6-port 超出范围（1-65535）：${V6P}" >&2
+    exit 1
+fi
 
 # ============================================================================
 # Worker 代码（整份覆盖部署，端口等用上面的变量注入）

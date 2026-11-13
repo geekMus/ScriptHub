@@ -33,7 +33,7 @@
 #   成功，之后的执行重试就只用本地这份文件，不会再产生下载流量。
 #
 # 退出码：0 成功；不可重试的失败 → 立即返回该退出码；重试耗尽 → 最后一次的
-# 退出码；参数写错 2。
+# 退出码；被外部 TERM/INT 打断 → 124（收掉整组，不再重试）；参数写错 2。
 # ============================================================================
 
 N=3
@@ -128,6 +128,9 @@ if [ "${D}" -gt 0 ]; then
     CT="--max-time ${D}"
 fi
 
+# 被外部 TERM/INT 叫停的标记（只在 setsid 分支里会置 1）
+_INTERRUPTED=0
+
 # 退出码是否属于「再试一次有意义」的那一类
 retryable() {
     case "$1" in
@@ -149,7 +152,10 @@ run_once() {
     if [ "${HAVE_SETSID}" -eq 0 ]; then
         # 退路：没有 setsid 时只能像以前那样只杀直接子进程
         timeout -s KILL "${X}" "$@"
-        return $?
+        _rc=$?
+        # busybox / 部分 coreutils 的 timeout 超时后给 137 而不是 124，统一成 124
+        case "${_rc}" in 137|143) _rc=124 ;; esac
+        return "${_rc}"
     fi
 
     setsid "$@" &
@@ -177,12 +183,16 @@ run_once() {
 
     # retry.sh 自己被打断（Ctrl-C、外层计划任务超时）时别把子进程留成孤儿：
     # setsid 让它脱离了本进程组，不显式收它，它就会一直跑到自己结束。
-    trap '[ -n "${_pid:-}" ] && kill -TERM "-${_pid}" 2>/dev/null' INT TERM
+    # 同时记下「是被打断的」：wait 返回后不能把 124 当成可重试失败继续下一轮，
+    # 否则外面明明叫停，脚本还会自顾自跑完 -n 次（N1 实测过：TERM 之后又跑了两轮）。
+    trap '[ -n "${_pid:-}" ] && kill -TERM "-${_pid}" 2>/dev/null; _INTERRUPTED=1' INT TERM
 
     wait "${_pid}"
     _rc=$?
     trap - INT TERM
     wait "${_wd}" 2>/dev/null
+
+    [ "${_INTERRUPTED:-0}" = "1" ] && return 124
 
     # 被我们自己的 watchdog 杀掉时：目标脚本若没来得及自己退出，退出码会是
     # 143（TERM）或 137（KILL）。统一报 124 —— 调用方只认「124/137 = 超时」，
@@ -243,6 +253,13 @@ while :; do
     if [ "${RC}" -eq 0 ]; then
         [ -n "${TMP}" ] && rm -f "${TMP}" 2>/dev/null
         exit 0
+    fi
+
+    # 外部 TERM/INT 已经叫停：run_once 收掉了目标进程组，这里直接结束，不再重试。
+    if [ "${_INTERRUPTED:-0}" = "1" ]; then
+        [ -n "${TMP}" ] && rm -f "${TMP}" 2>/dev/null
+        echo "✖ 收到中断信号，停止重试（退出码 124）" >&2
+        exit 124
     fi
 
     if ! retryable "${RC}"; then

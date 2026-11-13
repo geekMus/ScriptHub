@@ -41,11 +41,16 @@ Lucky 对每轮脚本只有 **15 秒**，单次请求最坏约 5 秒，所以 `-
 超时交给 DPanel（我们设 600 秒），脚本里只写重试：
 
 ```sh
-M=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main
 R=/tmp/retry.sh
-curl -fsSL --http1.1 "$M/retry/retry.sh" -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n 3 -i 2 -u "$M/container-autoupdate/container-autoupdate.sh" -- --compose myapp
+curl -fsSL --http1.1 \
+  "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
+  -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+sh "$R" -n 3 -i 2 \
+  -u "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
+  -- --compose myapp
 ```
+
+两个地址都是完整的文件地址，不用仓库基址再拼相对路径。
 
 ## 退出码
 

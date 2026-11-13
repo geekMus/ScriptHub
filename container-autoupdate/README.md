@@ -27,13 +27,16 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）。重试交给 `retry.sh`，超时交给 DPanel，脚本里不写超时：
 
 ```sh
-M=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main
 R=/tmp/retry.sh
-curl -fsSL --http1.1 "$M/retry/retry.sh" -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n 3 -i 2 -u "$M/container-autoupdate/container-autoupdate.sh" -- --compose myapp
+curl -fsSL --http1.1 \
+  "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
+  -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+sh "$R" -n 3 -i 2 \
+  -u "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
+  -- --compose myapp
 ```
 
-只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://raw.githubusercontent.com/...` 整个拼在它后面，用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像。每轮由 `retry.sh` 重新下载、`sh -n` 校验后再执行；下载失败或脚本非 0 退出都算这一轮失败，最多 3 次。
+两个脚本都写**完整地址**：重试脚本一个 URL、目标脚本一个 URL，中间不拼变量、不写相对路径。只走 `github.mus.pp.ua` 这一个加速站（把它放在最前面，后面接完整的 `https://raw.githubusercontent.com/...`；用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像。每轮由 `retry.sh` 重新下载、`sh -n` 校验后再执行；下载失败或脚本非 0 退出都算这一轮失败，最多 3 次。
 
 ## 退出码
 

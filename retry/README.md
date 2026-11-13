@@ -46,38 +46,6 @@ sh retry.sh -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" \
 
 同时把 `RETRY_TIMEOUT=<秒>` 放进环境变量。认识它的脚本（本仓库的 `container-autoupdate.sh`）会据此把内部预算压到上限以内、在被杀之前自己收手；不认识的脚本不受影响。系统里没有 `setsid` 也没有 `timeout` 时 `-x` 被忽略并打一行告警。
 
-## 在 Lucky 里
-
-Lucky 对每轮脚本只有 **15 秒**。单次部署约 5 秒，两轮加间隔约 11 秒，能塞进去：
-
-```sh
-# lucky-stun-worker.sh 的地址（换镜像只改这一行）
-LUCKY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
-sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u "$LUCKY_URL" \
-  -- --token "..." --account "..." --domain example.com --suffix rt.example.com --port "${port}"
-```
-
-`lucky-stun-worker.sh` 在连不上 CF、超时、CF 返回 5xx/429 时退出 `75`，所以这里只会为「真的可能好」的失败再跑一轮；参数写错时第一轮就结束。
-
-## 在 DPanel 计划任务里
-
-超时按阶段给：拉 `retry.sh` 本身 30 秒、下载目标脚本 20 秒、执行 150 秒。最坏情况（下载重试 3 次 + 执行重试 3 次）约 540 秒，压得住 DPanel 的 600 秒：
-
-```sh
-# 两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）
-RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
-
-R=/tmp/retry.sh
-curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
-  || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose magpie_gateway
-```
-
-`container-autoupdate.sh` 自己会用退出码区分：拉取镜像失败、Docker 暂时连不上 → `75`（值得再跑一轮）；compose 文件错、目标不存在、目录不存在 → `1`（停下来）。所以 DPanel 里的 3 次重试只会在真正有用的时候发生。
-
-它还会读 `RETRY_TIMEOUT`：发现执行上限是 150 秒，就把整轮预算压到 135 秒（留 15 秒收尾）。预算不够时不是硬着头皮往上冲，而是「拉完了但没时间部署」这种状态用 `75` 收手 —— 镜像层已经在本地，下一轮 pull 是空操作，时间全留给 `up -d`，正好落在 150 秒里。所以慢网络下看到的是「每轮做一半、下一轮接着做」，而不是「每轮都被 KILL、日志里什么都没有」。
-
 ## 退出码
 
 | 场景 | 码 |

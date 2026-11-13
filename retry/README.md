@@ -50,8 +50,9 @@ sh retry.sh -n 3 -i 2 -d 20 -x 150 \
 Lucky 对每轮脚本只有 **15 秒**。单次部署约 5 秒，两轮加间隔约 11 秒，能塞进去：
 
 ```sh
-sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u \
-  "https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh" \
+# lucky-stun-worker.sh 的地址（换镜像只改这一行）
+LUCKY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
+sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u "$LUCKY_URL" \
   -- --token "..." --account "..." --domain example.com --suffix rt.example.com --port "${port}"
 ```
 
@@ -62,11 +63,8 @@ sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u \
 超时按阶段给：拉 `retry.sh` 本身 30 秒、下载目标脚本 20 秒、执行 150 秒。最坏情况（下载重试 3 次 + 执行重试 3 次）约 540 秒，压得住 DPanel 的 600 秒：
 
 ```sh
-# 两个地址都用完整的文件地址。想换镜像 / 自建 CDN 只改这两行，下面的命令不用动：
-# 走镜像时把完整地址接在镜像前缀后面即可（如 https://<镜像>/https://raw.githubusercontent.com/...）。
-# retry.sh 本身（引导脚本）
+# 两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-# 被执行的脚本（这里以 container-autoupdate.sh 为例）
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 
 R=/tmp/retry.sh
@@ -74,8 +72,6 @@ curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
   || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
 sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose magpie_gateway
 ```
-
-两个变量里都放**完整的文件地址**，地址本身不拼接、不写相对路径。换镜像 / 自建 CDN 只改这两行，重试与超时逻辑不用碰；也不要改成 `github.com/.../raw/` 那种形式，会被缓存旧版本。
 
 `container-autoupdate.sh` 自己会用退出码区分：拉取镜像失败、Docker 暂时连不上 → `75`（值得再跑一轮）；compose 文件错、目标不存在、目录不存在 → `1`（停下来）。所以 DPanel 里的 3 次重试只会在真正有用的时候发生。
 

@@ -267,13 +267,11 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
-  #   两个地址抽成变量：想换镜像 / 自建 CDN 只改这两行，下面的命令不用动。
+  #   两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）。
   #   重试交给 retry.sh（最多 3 次），超时按阶段给：拉 retry.sh 30 秒、
   #   下载目标脚本 20 秒、执行 150 秒；脚本里不写 --max-time。
   #   --http1.1 是为了扛偶发的 TLS 抖动。
-  # retry.sh 本身（引导脚本）
   RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-  # 本脚本（container-autoupdate.sh）
   TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 
   R=/tmp/retry.sh

@@ -41,11 +41,8 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 `retry.sh` 会把执行上限（`-x`）告诉脚本（环境变量 `RETRY_TIMEOUT`），脚本据此把整轮预算压到 135 秒、并留 15 秒自己收尾 —— 它永远在被外部 KILL 之前先写清楚「停在哪、为什么」，而不是留下一句 `Killed`。
 
 ```sh
-# 两个地址都用完整的文件地址。想换镜像 / 自建 CDN 只改这两行，下面的命令不用动：
-# 走镜像时把完整地址接在镜像前缀后面即可（如 https://<镜像>/https://raw.githubusercontent.com/...）。
-# retry.sh 本身（引导脚本）
+# 两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-# 本脚本（container-autoupdate.sh）
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 
 R=/tmp/retry.sh
@@ -53,8 +50,6 @@ curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
   || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
 sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
 ```
-
-两个变量里都放**完整地址**，地址本身不拼接、不写相对路径。换镜像 / 自建 CDN 只改这两行，下面的命令不用动；也不要改成 `github.com/.../raw/` 那种形式，会被缓存旧版本。
 
 这条命令的行为：
 

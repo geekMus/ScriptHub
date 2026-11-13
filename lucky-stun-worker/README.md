@@ -53,12 +53,6 @@ sh "$R" --token "$CF_TOKEN" --account "$CF_ACCOUNT" \
 
 脚本自己不做重试，只如实报告这一次的结果。
 
-## Cloudflare 侧要有
-
-1. 一个叫 `stun-redirect` 的 Worker（或 `--worker` 指定的名字）。
-2. 路由把 `*.example.com/*` 指过去（`example.com` 换成自己的域名）。
-3. DNS 给 `*.rt.example.com` 建 **DNS only（灰云）** 的 A 记录，指向当前公网 IP；开橙云会形成跳转环路。
-
 ## 出问题看这里
 
 | 现象 | 原因 / 处置 |

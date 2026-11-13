@@ -112,7 +112,17 @@ DP_T_CHECK="${DP_T_CHECK:-${T_INSPECT:-120}}"
 DP_T_UPGRADE="${DP_T_UPGRADE:-420}"  # 单次「升级」调用超时（容器模式；实际还会被剩余预算收敛）
 DP_T_PULL="${DP_T_PULL:-420}"        # Compose 模式：单次 `docker compose pull` 超时
 DP_T_UP="${DP_T_UP:-180}"            # Compose 模式：单次 `docker compose up -d` 超时
-DP_MIN_UPGRADE="${DP_MIN_UPGRADE:-90}" # 剩余预算低于这个值就不动手，避免被计划任务半路杀掉
+# 「此刻还值不值得动手」的门槛：剩余预算低于它就不动，退 75 让外层下一轮接着做。
+# 取 30 秒的依据是实测：单个 compose 项目 up -d 只要 3-6 秒，30 秒已经含了停旧容器、
+# 建新容器、等健康的余量。以前写死 90 秒是按默认 T_HARD=540 配的；一旦外层 -x 只有
+# 150（T_HARD 变成 135），90 秒就等于「开局必须剩 2/3 预算」，拉取慢一点整轮白干 ——
+# N1 实测：拉了 77s 还剩 58s，明明 3 秒能部署完，却收手重来了第二轮。
+# 显式给了 DP_MIN_UPGRADE 就尊重它；只有用它自己的默认值时才跟着预算缩放。
+if [ -z "${DP_MIN_UPGRADE:-}" ]; then
+  DP_MIN_UPGRADE=30
+  # 预算本来就小（外层 -x 给得紧）时按 1/3 预算收紧，别把整轮都判成「时间不够」
+  [ "$T_HARD" -lt 90 ] && DP_MIN_UPGRADE=$(( T_HARD / 3 ))
+fi
 DRY_RUN="${DRY_RUN:-0}"
 EXIT_CODE=0
 # 可重试退出码：75 = 临时失败（网络不通、请求超时、镜像仓库暂时不可达）。
@@ -126,17 +136,19 @@ now()     { date +%s; }
 elapsed() { echo $(( $(now) - START )); }
 left()    { echo $(( T_HARD - $(elapsed) )); }
 
-# ---- 错误原因同时落到真正的 stderr ----
-# 计划任务（DPanel）在任务失败时只保留 stderr、丢掉 stdout。
-# 所以失败原因不能只写在 stdout 上，否则计划任务里只剩一句「exit status 1」。
-# 判定规则：消息以 ✗ / ERR / CRITICAL 开头的算「错误行」（✗ 是新写法，ERR 兼容旧的）；紧随错误行之后的缩进补充行
-# （log "   ..."）属于同一个错误块，一起进 stderr。
+# ---- 失败原因落到真正的 stderr ----
+# 计划任务（DPanel）在任务失败时只保留 stderr、丢掉 stdout，所以失败原因必须进 stderr，
+# 否则计划任务里只剩一句「exit status 1」。但**也不能两路都写**：同一句话会原样出现
+# 两遍（N1 实测到过重复行）。所以规则是「一句话只走一路」：
+#   · 普通进度行 → stdout（任务成功时计划任务保留的就是它）；
+#   · ✗ 错误行、以及「本轮已判失败」的 WARN 行 → stderr（任务失败时保留的是它）；
+#   · 紧随错误行之后的缩进补充行（log "   ..."）跟着上一行走；
+#   · 连 stderr 都用不了的环境（ERR_FD=1）退回 stdout，一行都不会丢。
 # 用 _LOG_ERR 记住「上一个错误块是否还在延续」，不靠猜缩进。
 #
-# WARN 行要看本轮是不是已经判了失败（EXIT_CODE=1）：
-#   · 判了 → 它就是这一轮的失败原因（例如「剩余时间不足，本轮不动手」），
-#           必须和 ✗ 一样进真 stderr，否则计划任务里只剩一句 exit status 1；
-#   · 没判 → 它只是提示（例如 config 读不出镜像清单，流程照走），留在 stdout。
+# WARN 行要看本轮是不是已经判了失败（EXIT_CODE != 0）：
+#   · 判了 → 它就是这一轮的失败原因（例如「剩余时间不足，本轮不动手」），跟 ✗ 一样进 stderr；
+#   · 没判 → 它只是提示（例如 config 读不出镜像清单，流程照走），走 stdout。
 # 所以凡是「先 WARN 再 EXIT_CODE=1」的地方，都要把 EXIT_CODE=1 提到 log 之前。
 _log_stderr() {
   if [ "${ERR_FD:-2}" = "3" ]; then
@@ -149,33 +161,34 @@ _log_stderr() {
 }
 log() {
   _l="[$(date '+%T')] $*"
-  echo "$_l"
   case "$*" in
     ✗\ *|ERR\ *|CRITICAL\ *)
+      # 错误行只进 stderr：计划任务失败时保留的就是它，再往 stdout 写一份会重复
       _log_stderr "$_l"
       _LOG_ERR=1
       ;;
     WARN\ *)
-      # 本轮已经判了失败 ⇒ 这句 WARN 就是失败原因，跟 ✗ 一样进真 stderr，
-      # 后面的缩进补充行（说明为什么不动作）也要跟着进去。
-      # 还没判失败 ⇒ 只是提示，留在 stdout，也不打断上一个错误块。
+      # 本轮已经判了失败 ⇒ 这句 WARN 就是失败原因，跟 ✗ 一样只进 stderr；
+      # 还没判失败 ⇒ 只是提示，走 stdout，也不打断上一个错误块。
       if [ "${EXIT_CODE:-0}" != "0" ]; then
         _log_stderr "$_l"
         _LOG_ERR=1
       else
+        echo "$_l"
         _LOG_ERR=0
       fi
       ;;
     "   "*)
-      # 缩进补充行：属于上一个错误块时一起进 stderr。
-      # 非缩进的普通日志行会清掉标记，错误块因此自然结束。
+      # 缩进补充行：属于上一个错误块时一起进 stderr，否则走 stdout。
       if [ "${_LOG_ERR:-0}" = "1" ]; then
         _log_stderr "$_l"
       else
+        echo "$_l"
         _LOG_ERR=0
       fi
       ;;
     *)
+      echo "$_l"
       _LOG_ERR=0
       ;;
   esac
@@ -246,7 +259,8 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   T_INSPECT / DP_T_CHECK        单次「检查」调用超时（秒，默认 120）
   DP_T_UPGRADE                  单次容器升级调用超时（秒，默认 420）
   DP_T_PULL / DP_T_UP           Compose 模式的 pull / up -d 超时（秒，默认 420 / 180）
-  DP_MIN_UPGRADE                剩余预算低于这个值就不动手（秒，默认 90）
+  DP_MIN_UPGRADE                剩余预算低于这个值就不动手（秒，默认 30；
+                              T_HARD 不足 90 时按 T_HARD/3 收紧）
 
 退出码：
   0   成功，或无需更新

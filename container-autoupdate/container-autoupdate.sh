@@ -226,7 +226,7 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
 选项：
   --compose <名>         Compose 项目名（项目目录/文件会自动从容器标签反查）
   --container <名>       容器名
-  --compose-dir <路径>   Compose 项目目录；不给时自动反查，一般不用填
+  --compose-dir <路径>   Compose 项目目录；在容器内跑（如 DPanel 计划任务）时填容器内路径
   --docker-sock <路径>   docker CLI 用的 socket；也可用 DOCKER_HOST
   --dpanel-container <名>   DPanel 容器名（默认 dpanel）；在容器内直接跑时用不到
   --dpanel-bin <路径>       DPanel CLI 在容器里的路径（默认 /app/server/dpanel）
@@ -640,9 +640,9 @@ _short_id() {
 }
 
 # 认清这个项目：工作目录 + compose 文件 + env 文件。
-# 优先用 compose 自己写在容器上的标签（那是最准的：就是当初用的那个文件），
-# 标签查不到时才用 --compose-dir / COMPOSE_DIR 兜底（那种情况让 compose 在
-# 该目录里自己找 compose.yaml / docker-compose.yml）。
+# 优先用 compose 自己写在容器上的标签（那是最准的：就是当初用的那个文件）；
+# 标签路径在本机不存在时（脚本在容器里跑很常见）用 --compose-dir / COMPOSE_DIR
+# 兜底，让 compose 在该目录里自己找 compose.yaml / docker-compose.yml。
 compose_locate() {
   C_DIR=""; C_FILE=""; C_ENVF=""
   _cid=$(docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_NAME" \
@@ -655,8 +655,17 @@ compose_locate() {
     [ -n "$_cf" ] && C_FILE="$_cf"
     [ -n "$_ef" ] && C_ENVF="$_ef"
   fi
-  if [ -z "$C_DIR" ] && [ -n "$COMPOSE_DIR" ]; then
+  # 标签给的是宿主机视角的路径。脚本在容器里跑时（例如 DPanel 计划任务，
+  # 宿主机的 /root/dpanel 在容器内是 /dpanel），这个目录可能根本不存在。
+  # 这种情况用 --compose-dir / COMPOSE_DIR 指定的路径兜底；目录都换了，
+  # 标签里的 compose 文件 / env 文件也一并不能用，交给 compose 在新目录里找。
+  if [ -n "$COMPOSE_DIR" ] && { [ -z "$C_DIR" ] || [ ! -d "$C_DIR" ]; }; then
+    if [ -n "$C_DIR" ]; then
+      log "提示：标签里的项目目录 $C_DIR 在本机不存在，改用 --compose-dir 指定的 $COMPOSE_DIR"
+    fi
     C_DIR="$COMPOSE_DIR"
+    C_FILE=""
+    C_ENVF=""
   fi
   if [ -z "$C_DIR" ]; then
     log "ERR 找不到 Compose 项目 $COMPOSE_NAME 的项目目录"
@@ -668,8 +677,13 @@ compose_locate() {
   fi
   if [ ! -d "$C_DIR" ]; then
     log "ERR Compose 项目目录不存在：$C_DIR"
+    log "    如果脚本在容器里跑，容器标签里是宿主机路径，容器内可能看不到；"
+    log "    用 --compose-dir <容器内路径> 指定，例如 DPanel 里是 /dpanel/compose/<项目>"
     return 1
   fi
+  # 标签里的文件路径可能是宿主机路径；文件不存在就让 compose 在目录里自己找。
+  if [ -n "$C_FILE" ] && [ ! -f "$C_FILE" ]; then C_FILE=""; fi
+  if [ -n "$C_ENVF" ] && [ ! -f "$C_ENVF" ]; then C_ENVF=""; fi
   return 0
 }
 

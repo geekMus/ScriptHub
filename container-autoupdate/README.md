@@ -38,7 +38,7 @@ sh "$URL" $ARGS
 | --- | --- | --- |
 | `--compose <名>` | `UPD_COMPOSE` | Compose 项目名；项目目录/文件从容器标签自动反查 |
 | `--container <名>` | `UPD_CONTAINER` | 容器名 |
-| `--compose-dir <路径>` | `COMPOSE_DIR` | 指定 Compose 项目目录；一般不用填 |
+| `--compose-dir <路径>` | `COMPOSE_DIR` | 指定 Compose 项目目录；在容器内跑时填容器内路径（如 DPanel 的 `/dpanel/compose/<项目>`） |
 | `--docker-sock <路径>` | `DOCKER_SOCK` / `DOCKER_HOST` | docker CLI 端点 |
 | `--dpanel-container <名>` | `DPANEL_NAME` | DPanel 容器名（默认 `dpanel`） |
 | `--dpanel-bin <路径>` | `DPANEL_BIN` | 容器内 DPanel CLI 路径（默认 `/app/server/dpanel`） |

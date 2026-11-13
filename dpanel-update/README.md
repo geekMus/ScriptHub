@@ -28,7 +28,7 @@ ARGS="--network DockerBridge --ip 172.20.0.15"
 
 # 下载一次再执行；$@ 透传调用方额外参数
 curl -fsSL "$URL" -o /tmp/dpanel-update.sh \
-  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+  || { echo "✗ 拉取脚本失败" >&2; exit 1; }
 exec sh /tmp/dpanel-update.sh $ARGS "$@"
 ```
 

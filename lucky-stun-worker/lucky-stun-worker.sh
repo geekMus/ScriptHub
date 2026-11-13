@@ -48,7 +48,7 @@ PORT="${port}"
 
 # 每个带值的选项都先确认后面确实跟着一个参数：busybox ash 的 `shift 2` 在参数
 # 不足时不会报错、也不会真正前移，会在这里变成死循环（N1 实测）。
-need() { [ "$1" -ge 2 ] || { echo "❌ 参数 ${2} 后面缺少值（--help 看用法）" >&2; exit 1; }; }
+need() { [ "$1" -ge 2 ] || { echo "✗ 参数 ${2} 后面缺少值（--help 看用法）" >&2; exit 1; }; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -62,7 +62,7 @@ while [ $# -gt 0 ]; do
         --v6-port)   need $# "$1"; V6P="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=1; shift ;;
         -h|--help)   sed -n '2,34p' "$0"; exit 0 ;;
-        *) echo "未知参数：$1（--help 看用法）" >&2; exit 1 ;;
+        *) echo "✗ 未知参数：$1（--help 看用法）" >&2; exit 1 ;;
     esac
 done
 
@@ -77,25 +77,23 @@ MISSING=""
 [ -n "${PORT}" ]    || MISSING="${MISSING} --port"
 
 if [ -n "${MISSING}" ]; then
-    echo "❌ 缺少参数：${MISSING}" >&2
-    echo "   --domain / --suffix / --port 没有默认值，必须自己传" >&2
-    echo "   （也可以设环境变量 BASE_DOMAIN / V4_SUFFIX / port）" >&2
+    echo "✗ 缺少参数：${MISSING}（--domain/--suffix/--port 没有默认值，也可用 BASE_DOMAIN/V4_SUFFIX/port 环境变量）" >&2
     echo "   用法：$0 --token ... --account ... --domain <主域名> --suffix <跳转后缀> --port <端口>" >&2
     exit 1
 fi
 
 case "${PORT}" in
-    ''|*[!0-9]*) echo "❌ --port 不是合法端口：${PORT}" >&2; exit 1 ;;
+    ''|*[!0-9]*) echo "✗ --port 不是合法端口：${PORT}" >&2; exit 1 ;;
 esac
 if [ "${PORT}" -lt 1 ] || [ "${PORT}" -gt 65535 ]; then
-    echo "❌ --port 超出范围（1-65535）：${PORT}" >&2
+    echo "✗ --port 超出范围（1-65535）：${PORT}" >&2
     exit 1
 fi
 case "${V6P}" in
-    ''|*[!0-9]*) echo "❌ --v6-port 不是合法端口：${V6P}" >&2; exit 1 ;;
+    ''|*[!0-9]*) echo "✗ --v6-port 不是合法端口：${V6P}" >&2; exit 1 ;;
 esac
 if [ "${V6P}" -lt 1 ] || [ "${V6P}" -gt 65535 ]; then
-    echo "❌ --v6-port 超出范围（1-65535）：${V6P}" >&2
+    echo "✗ --v6-port 超出范围（1-65535）：${V6P}" >&2
     exit 1
 fi
 
@@ -275,17 +273,18 @@ fi
 # 部署 Worker（单次；需要重试请用 retry/retry.sh 包一层）
 # ============================================================================
 
+_d0=$(date +%s)
 RESP=$(curl -sS --connect-timeout 2 --max-time 5 -w '\n%{http_code}' -X PUT \
     "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/scripts/${WORKER}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/javascript" \
     --data "${WORKER_CODE}" 2>&1)
 CURL_RC=$?
+_dd=$(( $(date +%s) - _d0 ))
 
 if [ "${CURL_RC}" -ne 0 ]; then
-    echo "❌ 请求失败（curl 退出码 ${CURL_RC}）：连不上 api.cloudflare.com 或超时"
-    printf '%s\n' "${RESP}" | sed '$d'
-    echo "   属于临时失败（退出码 75），外层 retry.sh 会再试"
+    echo "✗ 连不上 Cloudflare（curl ${CURL_RC}，${_dd}s）：属临时失败（75），retry.sh 会再试" >&2
+    printf '%s\n' "${RESP}" | sed '$d' | awk 'NF' | head -n3 | sed 's/^/    /' >&2
     exit 75
 fi
 
@@ -294,19 +293,18 @@ HTTP=$(printf '%s\n' "${RESP}" | tail -n1)
 BODY=$(printf '%s\n' "${RESP}" | sed '$d')
 
 if printf '%s\n' "${BODY}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo "✅ Worker 部署成功（${SUFFIX}:${PORT}）"
+    echo "✓ 部署成功 ${SUFFIX}:${PORT}（${_dd}s）"
     exit 0
 fi
 
 case "${HTTP}" in
     429|5??)
-        echo "❌ Worker 部署失败（HTTP ${HTTP}）：Cloudflare 侧临时错误或限流"
-        printf '%s\n' "${BODY}"
-        echo "   属于临时失败（退出码 75），外层 retry.sh 会再试"
+        echo "✗ Worker 部署失败（HTTP ${HTTP}）：Cloudflare 侧临时错误，属临时失败（75），retry.sh 会再试" >&2
+        printf '%s\n' "${BODY}" | awk 'NF' | head -n3 | sed 's/^/    /' >&2
         exit 75
         ;;
 esac
 
-echo "❌ Worker 部署失败（HTTP ${HTTP}）：参数/鉴权问题，重试没有意义"
-printf '%s\n' "${BODY}"
+echo "✗ Worker 部署失败（HTTP ${HTTP}）：参数/鉴权问题，重试没有意义" >&2
+printf '%s\n' "${BODY}" | awk 'NF' | head -n3 | sed 's/^/    /' >&2
 exit 1

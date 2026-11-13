@@ -28,7 +28,7 @@ RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
 TARGET_ARGS=""
 
 curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
-  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+  || { echo "✗ 拉取脚本失败" >&2; exit 1; }
 sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
 ```
 

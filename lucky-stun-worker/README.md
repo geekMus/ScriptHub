@@ -14,7 +14,7 @@ ARGS="--token $CF_WORKER_API_TOKEN --account $CF_ACCOUNT_ID --domain example.com
 
 # 远程地址：下载一次再执行
 curl -fsSL --http1.1 --max-time 3 "$URL" -o /tmp/lucky-stun-worker.sh \
-  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+  || { echo "✗ 拉取脚本失败" >&2; exit 1; }
 sh /tmp/lucky-stun-worker.sh $ARGS
 
 # 本地路径：直接执行
@@ -37,7 +37,7 @@ sh "$URL" $ARGS
 | `--v6-port` | `V6_PORT` | 默认 `100` |
 | `--dry-run` | — | 只打印解析结果，不部署 |
 
-`--token`、`--account`、`--domain`、`--suffix`、`--port` 都没有默认值：少传一个就打印 `❌ 缺少参数：…` 并以 `1` 退出，不会把示例域名部署上去。命令行参数优先于环境变量。
+`--token`、`--account`、`--domain`、`--suffix`、`--port` 都没有默认值：少传一个就打印 `✗ 缺少参数：…` 并以 `1` 退出，不会把示例域名部署上去。命令行参数优先于环境变量。
 
 ## 退出码
 
@@ -54,8 +54,8 @@ sh "$URL" $ARGS
 | 现象 | 原因 / 处置 |
 | --- | --- |
 | `调用脚本失败：signal: killed` | Lucky 15 秒超时；通常是拉脚本或 CF 请求被网络拖住 |
-| `❌ Worker 部署失败（HTTP 4xx）` | Token 权限/过期，或账户 ID 不对；重试无用 |
-| `❌ 请求失败（curl 退出码 …）` | 容器到 CF 不通；确认 `api.cloudflare.com` 的分流 |
+| `✗ Worker 部署失败（HTTP 4xx）` | Token 权限/过期，或账户 ID 不对；重试无用 |
+| `✗ 连不上 Cloudflare（curl …）` | 容器到 CF 不通；确认 `api.cloudflare.com` 的分流 |
 | 端口对、外面连不上 | 用 check-host.net 测「公网 IP:端口」，确认打洞本身通 |
 | Worker 里是旧端口 | 那次部署失败了；看 Lucky 日志那行，按退出码判断是 `75` 还是 `1` |
 

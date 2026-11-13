@@ -129,7 +129,7 @@ command -v setsid >/dev/null 2>&1 && HAVE_SETSID=1
 HAVE_TIMEOUT=0
 command -v timeout >/dev/null 2>&1 && HAVE_TIMEOUT=1
 if [ "${X}" -gt 0 ] && [ "${HAVE_SETSID}" -eq 0 ] && [ "${HAVE_TIMEOUT}" -eq 0 ]; then
-    say "⚠ 系统里没有 setsid 也没有 timeout 命令，-x ${X} 被忽略"
+    say "WARN 没有 setsid/timeout，-x ${X} 被忽略"
     X=0
 fi
 
@@ -226,34 +226,32 @@ if [ "${IS_REMOTE}" -eq 1 ]; then
     # ---- 阶段一：下载（只在这一阶段会重复下载）----
     T=1
     while :; do
-        say "▶ 第 ${T}/${N} 次: 下载 ${TARGET}${CT:+（超时 ${D}s）}"
+        # 第一次不打进度：拉取通常一瞬间，这一行只会盖住真正要看的内容；
+        # 重试才值得说一声（说明「刚才那次没成，现在在补」）。
+        [ "${T}" -gt 1 ] && say "▶ 重试下载（第 ${T}/${N} 次）"
         TMP=$(mktemp 2>/dev/null || echo "/tmp/retry.$$")
         DL_OK=0
+        _why="下载失败"
         if curl -fsSL --http1.1 ${CT} "${TARGET}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
             if sh -n "${TMP}" 2>/dev/null; then
                 DL_OK=1
             else
-                say "✖ 下载到的脚本语法有误"
+                _why="下载到的脚本语法有误"
             fi
         else
-            if [ "${D}" -gt 0 ]; then
-                say "✖ 下载失败或超过 ${D}s"
-            else
-                say "✖ 下载失败"
-            fi
+            [ "${D}" -gt 0 ] && _why="下载失败（超过 ${D}s）"
         fi
         [ "${DL_OK}" -eq 1 ] && break
         rm -f "${TMP}" 2>/dev/null
         TMP=""
         if [ "${T}" -ge "${N}" ]; then
-            echo "✖ 下载失败，已试 ${N} 次" >&2
+            echo "✗ 拉取脚本失败：${_why}，已试 ${N} 次" >&2
             exit 75
         fi
-        say "✖ ${I} 秒后重新下载"
+        say "✗ ${_why}，${I}s 后重试（第 $((T + 1))/${N} 次）"
         sleep "${I}"
         T=$((T + 1))
     done
-    say "✔ 已下载并通过语法校验（后面重试只用这份，不再重新下载）"
     RUN_FILE="${TMP}"
 fi
 
@@ -266,10 +264,10 @@ fi
 T=1
 while :; do
     if [ -n "${RUN_FILE}" ]; then
-        say "▶ 第 ${T}/${N} 次执行: sh ${RUN_FILE} $*"
+        [ "${T}" -gt 1 ] && say "▶ 重试执行（第 ${T}/${N} 次）"
         run_once sh "${RUN_FILE}" "$@"
     else
-        say "▶ 第 ${T}/${N} 次执行: $*"
+        [ "${T}" -gt 1 ] && say "▶ 重试执行（第 ${T}/${N} 次）"
         run_once "$@"
     fi
     RC=$?
@@ -282,13 +280,13 @@ while :; do
     # 外部 TERM/INT 已经叫停：run_once 收掉了目标进程组，这里直接结束，不再重试。
     if [ "${_INTERRUPTED:-0}" = "1" ]; then
         [ -n "${TMP}" ] && rm -f "${TMP}" 2>/dev/null
-        echo "✖ 收到中断信号，停止重试（退出码 124）" >&2
+        echo "✗ 收到中断信号，停止重试（124）" >&2
         exit 124
     fi
 
     if ! retryable "${RC}"; then
         [ -n "${TMP}" ] && rm -f "${TMP}" 2>/dev/null
-        echo "✖ 退出码 ${RC}：不是可重试失败（可重试码：${RETRY},124,137），不再重试" >&2
+        echo "✗ 退出码 ${RC}，不可重试（只重试 ${RETRY},124,137）" >&2
         exit "${RC}"
     fi
 
@@ -296,10 +294,10 @@ while :; do
         [ -n "${TMP}" ] && rm -f "${TMP}" 2>/dev/null
         break
     fi
-    say "✖ 可重试失败（退出码 ${RC}），${I} 秒后重试（第 $((T + 1))/${N} 次）"
+    say "✗ 退出码 ${RC} 可重试，${I}s 后重试（第 $((T + 1))/${N} 次）"
     sleep "${I}"
     T=$((T + 1))
 done
 
-echo "✖ 已试 ${N} 次，最后一次退出码 ${RC}" >&2
+echo "✗ 已试 ${N} 次，最后一次 rc=${RC}" >&2
 exit "${RC}"

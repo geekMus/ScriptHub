@@ -21,7 +21,7 @@ ARGS="--compose myapp"
 
 # 远程地址：下载一次再执行
 curl -fsSL "$URL" -o /tmp/container-autoupdate.sh \
-  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+  || { echo "✗ 拉取脚本失败" >&2; exit 1; }
 sh /tmp/container-autoupdate.sh $ARGS
 
 # 本地路径：直接执行

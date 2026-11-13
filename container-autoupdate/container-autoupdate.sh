@@ -129,13 +129,13 @@ left()    { echo $(( T_HARD - $(elapsed) )); }
 # ---- 错误原因同时落到真正的 stderr ----
 # 计划任务（DPanel）在任务失败时只保留 stderr、丢掉 stdout。
 # 所以失败原因不能只写在 stdout 上，否则计划任务里只剩一句「exit status 1」。
-# 判定规则：消息以 ERR / CRITICAL 开头的算「错误行」；紧随错误行之后的缩进补充行
+# 判定规则：消息以 ✗ / ERR / CRITICAL 开头的算「错误行」（✗ 是新写法，ERR 兼容旧的）；紧随错误行之后的缩进补充行
 # （log "   ..."）属于同一个错误块，一起进 stderr。
 # 用 _LOG_ERR 记住「上一个错误块是否还在延续」，不靠猜缩进。
 #
 # WARN 行要看本轮是不是已经判了失败（EXIT_CODE=1）：
 #   · 判了 → 它就是这一轮的失败原因（例如「剩余时间不足，本轮不动手」），
-#           必须和 ERR 一样进真 stderr，否则计划任务里只剩一句 exit status 1；
+#           必须和 ✗ 一样进真 stderr，否则计划任务里只剩一句 exit status 1；
 #   · 没判 → 它只是提示（例如 config 读不出镜像清单，流程照走），留在 stdout。
 # 所以凡是「先 WARN 再 EXIT_CODE=1」的地方，都要把 EXIT_CODE=1 提到 log 之前。
 _log_stderr() {
@@ -148,15 +148,15 @@ _log_stderr() {
   fi
 }
 log() {
-  _l="[$(date '+%F %T')] $*"
+  _l="[$(date '+%T')] $*"
   echo "$_l"
   case "$*" in
-    ERR\ *|CRITICAL\ *)
+    ✗\ *|ERR\ *|CRITICAL\ *)
       _log_stderr "$_l"
       _LOG_ERR=1
       ;;
     WARN\ *)
-      # 本轮已经判了失败 ⇒ 这句 WARN 就是失败原因，跟 ERR 一样进真 stderr，
+      # 本轮已经判了失败 ⇒ 这句 WARN 就是失败原因，跟 ✗ 一样进真 stderr，
       # 后面的缩进补充行（说明为什么不动作）也要跟着进去。
       # 还没判失败 ⇒ 只是提示，留在 stdout，也不打断上一个错误块。
       if [ "${EXIT_CODE:-0}" != "0" ]; then
@@ -190,8 +190,7 @@ on_signal() {
   # 内部调用可能跑在自己的会话里（run_bounded 用 setsid），退出前先把它们收掉
   [ -n "${_bpid:-}" ] && kill -TERM "-${_bpid}" 2>/dev/null
   EXIT_CODE="$RETRY_EXIT"
-  log "WARN 收到 SIG$1，提前结束（已跑 $(elapsed)s / 上限 ${T_HARD}s）"
-  log "     本轮没做完的动作下一轮会接着做；已拉下来的镜像层不重复下载"
+  log "WARN 收到 SIG$1，提前结束（$(elapsed)s/${T_HARD}s）：下一轮接着做，已拉的镜像层不重复下载"
   exit "$RETRY_EXIT"
 }
 trap 'on_signal TERM' TERM
@@ -274,7 +273,7 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
 
   # 远程地址：下载一次再执行
   curl -fsSL "$URL" -o /tmp/container-autoupdate.sh \
-    || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+    || { echo "✗ 拉取脚本失败" >&2; exit 1; }
   sh /tmp/container-autoupdate.sh $ARGS
 
   # 本地路径：直接执行
@@ -292,28 +291,28 @@ parse_args() {
   _SAW_CONTAINER=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --compose)      [ "$#" -ge 2 ] || { echo "ERR --compose 缺少参数" >&"$ERR_FD"; exit 1; }
+      --compose)      [ "$#" -ge 2 ] || { echo "✗ --compose 缺少参数" >&"$ERR_FD"; exit 1; }
                       COMPOSE_NAME="$2"; CONTAINER_NAME=""; _SAW_COMPOSE=1; shift 2 ;;
-      --container)    [ "$#" -ge 2 ] || { echo "ERR --container 缺少参数" >&"$ERR_FD"; exit 1; }
+      --container)    [ "$#" -ge 2 ] || { echo "✗ --container 缺少参数" >&"$ERR_FD"; exit 1; }
                       CONTAINER_NAME="$2"; COMPOSE_NAME=""; _SAW_CONTAINER=1; shift 2 ;;
-      --docker-sock)  [ "$#" -ge 2 ] || { echo "ERR --docker-sock 缺少参数" >&"$ERR_FD"; exit 1; }
+      --docker-sock)  [ "$#" -ge 2 ] || { echo "✗ --docker-sock 缺少参数" >&"$ERR_FD"; exit 1; }
                       DOCKER_SOCK="$2"; shift 2 ;;
-      --compose-dir)  [ "$#" -ge 2 ] || { echo "ERR --compose-dir 缺少参数" >&"$ERR_FD"; exit 1; }
+      --compose-dir)  [ "$#" -ge 2 ] || { echo "✗ --compose-dir 缺少参数" >&"$ERR_FD"; exit 1; }
                       COMPOSE_DIR="$2"; shift 2 ;;
-      --dpanel-container) [ "$#" -ge 2 ] || { echo "ERR --dpanel-container 缺少参数" >&"$ERR_FD"; exit 1; }
+      --dpanel-container) [ "$#" -ge 2 ] || { echo "✗ --dpanel-container 缺少参数" >&"$ERR_FD"; exit 1; }
                       DPANEL_NAME="$2"; shift 2 ;;
-      --dpanel-bin)   [ "$#" -ge 2 ] || { echo "ERR --dpanel-bin 缺少参数" >&"$ERR_FD"; exit 1; }
+      --dpanel-bin)   [ "$#" -ge 2 ] || { echo "✗ --dpanel-bin 缺少参数" >&"$ERR_FD"; exit 1; }
                       DPANEL_BIN="$2"; shift 2 ;;
-      --dpanel-docker-env) [ "$#" -ge 2 ] || { echo "ERR --dpanel-docker-env 缺少参数" >&"$ERR_FD"; exit 1; }
+      --dpanel-docker-env) [ "$#" -ge 2 ] || { echo "✗ --dpanel-docker-env 缺少参数" >&"$ERR_FD"; exit 1; }
                       DPANEL_DOCKER_ENV="$2"; shift 2 ;;
       --dry-run)      DRY_RUN=1; shift ;;
       -h|--help)      usage; exit 0 ;;
-      *)              echo "ERR 未知参数：$1（用 --help 查看用法）" >&"$ERR_FD"; exit 1 ;;
+      *)              echo "✗ 未知参数：$1（用 --help 查看用法）" >&"$ERR_FD"; exit 1 ;;
     esac
   done
   # 命令行上两个目标都显式给过 → 直接拒绝，不做「后者胜出」的静默覆盖
   if [ "$_SAW_COMPOSE" = "1" ] && [ "$_SAW_CONTAINER" = "1" ]; then
-    echo "ERR 配置错误：--compose 与 --container 必须且只能给一个" >&"$ERR_FD"
+    echo "✗ 配置错误：--compose 与 --container 必须且只能给一个" >&"$ERR_FD"
     exit 1
   fi
 }
@@ -472,26 +471,23 @@ check_deps() {
     command -v docker >/dev/null 2>&1 || _missing="$_missing docker"
   fi
   if [ -n "$_missing" ]; then
-    echo "ERR 缺少依赖命令：$_missing" >&"$ERR_FD"
-    echo "    需要 timeout 或 setsid，以及 busybox/coreutils 的 sed、awk、grep；" >&"$ERR_FD"
-    echo "    Compose 模式还需要 docker（含 docker compose 插件）；不在 DPanel 容器里跑时也需要 docker" >&"$ERR_FD"
+    echo "✗ 缺少命令：$_missing" >&"$ERR_FD"
+    echo "    要 sed/awk/grep 和 timeout（或 setsid）；Compose 模式和容器外运行还要 docker" >&"$ERR_FD"
     exit 1
   fi
   if [ "$_need_docker" = "1" ]; then
     # 要用 docker 就先验证它真的连得上：连不上时报「找不到 DPanel CLI」
     # 会把人引到完全无关的排查方向（AGENTS.md 记过这个坑）。
     if ! run_bounded 20 docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
-      echo "ERR 无法连接 Docker（DOCKER_HOST=${DOCKER_HOST:-未设置}）" >&"$ERR_FD"
-      echo "    请确认 Docker 正在运行，且当前用户有权限访问 socket" >&"$ERR_FD"
-      echo "    Docker 正在重启时也长这样：属于临时失败（退出码 75），外层可再试" >&"$ERR_FD"
+      echo "✗ 连不上 Docker（DOCKER_HOST=${DOCKER_HOST:-未设置}）" >&"$ERR_FD"
+      echo "    Docker 没起来或没权限时都长这样：属临时失败（75），外层会再试" >&"$ERR_FD"
       exit "$RETRY_EXIT"
     fi
   fi
   if [ "$_GOAL" = "compose" ]; then
     # Compose 分支的更新动作全靠 compose 插件，它不可用就没必要继续。
     if ! run_bounded 20 docker compose version >/dev/null 2>&1; then
-      echo "ERR 无法执行 docker compose（缺 compose 插件？）" >&"$ERR_FD"
-      echo "    Compose 模式需要 Docker Compose v2 插件版（docker compose，不是 docker-compose）" >&"$ERR_FD"
+      echo "✗ 执行不了 docker compose（要 v2 插件版：docker compose，不是 docker-compose）" >&"$ERR_FD"
       exit 1
     fi
     return 0
@@ -499,54 +495,50 @@ check_deps() {
   # 容器分支：DPanel CLI 必须可用，所有更新动作都靠它。
   _dv=$(dp_cli "$(dp_timeout "$DP_T_CHECK")" version | sed -n 's/^version: *//p' | head -n1)
   if [ -z "$_dv" ]; then
-    echo "ERR 无法调用 DPanel CLI（$DPANEL_BIN）" >&"$ERR_FD"
+    echo "✗ 调不动 DPanel CLI（$DPANEL_BIN）" >&"$ERR_FD"
     if [ "$DP_IN_CONTAINER" = "1" ]; then
-      echo "    脚本当前环境里没有这个可执行文件" >&"$ERR_FD"
+      echo "    当前环境里没有这个可执行文件（路径不对用 --dpanel-bin）" >&"$ERR_FD"
     else
-      echo "    已尝试：docker exec $DPANEL_NAME $DPANEL_BIN version" >&"$ERR_FD"
-      echo "    DPanel 容器名不是 $DPANEL_NAME 时用 --dpanel-container 指定，路径不同用 --dpanel-bin" >&"$ERR_FD"
+      echo "    试过 docker exec $DPANEL_NAME $DPANEL_BIN version；容器名/路径不对用 --dpanel-container / --dpanel-bin" >&"$ERR_FD"
     fi
     exit 1
-  fi
-  if [ "$DP_IN_CONTAINER" = "1" ]; then
-    log "DPanel CLI 就绪（version $_dv，直接执行）"
-  else
-    log "DPanel CLI 就绪（version $_dv，docker exec $DPANEL_NAME）"
   fi
 }
 
 # ---------- 容器模式：交给 DPanel container:upgrade ----------
 container_update() {
-  log "MODE container 容器=$CONTAINER_NAME"
+  log "▶ container $CONTAINER_NAME（预算 ${T_HARD}s）"
+  _c0=$(elapsed)
   _out=$(dp_cli "$(dp_timeout "$DP_T_CHECK")" container:upgrade --name "$CONTAINER_NAME" --docker-env "$DPANEL_DOCKER_ENV")
   _rc=$?
+  _cd=$(( $(elapsed) - _c0 ))
   _j=$(dp_json "$_out")
   if [ -z "$_j" ]; then
-    log "ERR DPanel 没有返回可解析的结果（container:upgrade --name $CONTAINER_NAME）"
+    log "✗ DPanel 检查没返回可解析的结果（rc=$_rc，${_cd}s）"
     dp_noise "$_out" | while IFS= read -r _nl; do log "    $_nl"; done
-    log "    容器未做任何改动"
     if [ "$_rc" = "124" ] || [ "$_rc" = "137" ]; then
-      log "    DPanel 调用超时（退出码 $_rc）：属于临时失败（退出码 75）"
+      log "    调用超时，容器未改动：属临时失败（75）"
       EXIT_CODE="$RETRY_EXIT"
     else
+      log "    容器未做任何改动"
       EXIT_CODE=1
     fi
     return 1
   fi
   if dp_failed "$_j"; then
-    log "ERR DPanel 检查失败：$(jp_val "$_j" error)"
+    log "✗ DPanel 检查失败：$(jp_val "$_j" error)"
     dp_noise "$_out" | while IFS= read -r _nl; do log "    $_nl"; done
     log "    容器未做任何改动"
     EXIT_CODE=1
     return 1
   fi
   if [ "$(jp_val "$_j" upgrade)" != "true" ]; then
-    log "OK 容器 $CONTAINER_NAME 已是最新（DPanel 报告 status=$(jp_val "$_j" status)）"
+    log "✓ 完成 $(elapsed)s · 已是最新（status=$(jp_val "$_j" status)）"
     return 0
   fi
-  log "发现新版本（远端 digest=$(jp_val "$_j" digest)）"
+  log "   检查 ✓ ${_cd}s · 有新版本（digest=$(jp_val "$_j" digest)）"
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY 只检查不动手，本轮不升级"
+    log "DRY 只检查，本轮不升级"
     return 0
   fi
   _rest=$(left)
@@ -554,35 +546,36 @@ container_update() {
     # 先判失败再打 WARN：log() 靠 EXIT_CODE 决定这句要不要进真 stderr（见文件头部说明）
     # 用 75（可重试）而不是 1：这一轮什么都没动，下一轮换个完整预算就能做完
     EXIT_CODE="$RETRY_EXIT"
-    log "WARN 剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不启动升级，容器保持原样"
-    log "     下一轮计划任务会重新检查；也可以把 T_HARD 或计划任务的超时调大"
+    log "WARN 剩余 ${_rest}s < ${DP_MIN_UPGRADE}s，本轮不升级：下一轮补做，或调大 T_HARD"
     return 1
   fi
   _t=$(dp_timeout "$DP_T_UPGRADE")
-  log "交给 DPanel 升级（等待上限 ${_t}s；新容器起不来时 DPanel 会自行回滚）"
+  log "   升级中（上限 ${_t}s；起不来时 DPanel 会自行回滚）"
+  _u0=$(elapsed)
   _out2=$(dp_cli "$_t" container:upgrade --name "$CONTAINER_NAME" --upgrade --docker-env "$DPANEL_DOCKER_ENV")
   _rc2=$?
+  _ud=$(( $(elapsed) - _u0 ))
   _j2=$(dp_json "$_out2")
   if [ -z "$_j2" ]; then
-    log "ERR DPanel 升级没有返回可解析的结果（可能等待超时，或 DPanel 侧出错）"
+    log "✗ DPanel 升级没返回可解析的结果（rc=$_rc2，${_ud}s）"
     dp_noise "$_out2" | while IFS= read -r _nl; do log "    $_nl"; done
-    log "    容器保持原样；DPanel 若已重建过会自行回滚（备份容器 <容器名>-bak-<时间戳>）"
     if [ "$_rc2" = "124" ] || [ "$_rc2" = "137" ]; then
-      log "    DPanel 调用超时（退出码 $_rc2）：属于临时失败（退出码 75）"
+      log "    调用超时，容器原样：属临时失败（75）；已重建过则 DPanel 会回滚"
       EXIT_CODE="$RETRY_EXIT"
     else
+      log "    容器原样；已重建过则 DPanel 会回滚到 <名字>-bak-<时间戳>"
       EXIT_CODE=1
     fi
     return 1
   fi
   if dp_failed "$_j2"; then
-    log "ERR DPanel 升级失败：$(jp_val "$_j2" error)"
+    log "✗ DPanel 升级失败：$(jp_val "$_j2" error)"
     dp_noise "$_out2" | while IFS= read -r _nl; do log "    $_nl"; done
-    log "    容器保持原样；DPanel 若已重建过会自行回滚（备份容器 <容器名>-bak-<时间戳>）"
+    log "    容器原样；已重建过则 DPanel 会回滚到 <名字>-bak-<时间戳>"
     EXIT_CODE=1
     return 1
   fi
-  log "OK DPanel 已完成升级（containerId=$(jp_val "$_j2" containerId)）"
+  log "✓ 完成 $(elapsed)s · 已升级（${_ud}s，containerId=$(jp_val "$_j2" containerId)）"
   return 0
 }
 
@@ -644,7 +637,7 @@ _short_id() {
 # 标签路径在本机不存在时（脚本在容器里跑很常见）用 --compose-dir / COMPOSE_DIR
 # 兜底，让 compose 在该目录里自己找 compose.yaml / docker-compose.yml。
 compose_locate() {
-  C_DIR=""; C_FILE=""; C_ENVF=""
+  C_DIR=""; C_FILE=""; C_ENVF=""; _LOC_WARN=""
   _cid=$(docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_NAME" \
            --format '{{.ID}}' 2>/dev/null | head -n1)
   if [ -n "$_cid" ]; then
@@ -660,25 +653,22 @@ compose_locate() {
   # 这种情况用 --compose-dir / COMPOSE_DIR 指定的路径兜底；目录都换了，
   # 标签里的 compose 文件 / env 文件也一并不能用，交给 compose 在新目录里找。
   if [ -n "$COMPOSE_DIR" ] && { [ -z "$C_DIR" ] || [ ! -d "$C_DIR" ]; }; then
+    # 这句留到 ▶ 之后再打（见 compose_update）：先让人看到「在干啥」，再报偏差
     if [ -n "$C_DIR" ]; then
-      log "提示：标签里的项目目录 $C_DIR 在本机不存在，改用 --compose-dir 指定的 $COMPOSE_DIR"
+      _LOC_WARN="标签里的项目目录 $C_DIR 不存在，改用 --compose-dir 的 $COMPOSE_DIR"
     fi
     C_DIR="$COMPOSE_DIR"
     C_FILE=""
     C_ENVF=""
   fi
   if [ -z "$C_DIR" ]; then
-    log "ERR 找不到 Compose 项目 $COMPOSE_NAME 的项目目录"
-    log "    当前 Docker 里没有带「$COMPOSE_NAME」这个 compose 项目标签的容器，反查不到"
-    log "    处理方式二选一："
-    log "      1) 用 --compose-dir <路径> 指定 compose 文件所在目录"
-    log "      2) 确认项目名写法；项目还没部署过就先手动 compose up 一次"
+    log "✗ 找不到 Compose 项目 $COMPOSE_NAME 的目录（Docker 里没有带该标签的容器）"
+    log "    用 --compose-dir <路径> 指定；项目还没部署过就先手动 compose up 一次"
     return 1
   fi
   if [ ! -d "$C_DIR" ]; then
-    log "ERR Compose 项目目录不存在：$C_DIR"
-    log "    如果脚本在容器里跑，容器标签里是宿主机路径，容器内可能看不到；"
-    log "    用 --compose-dir <容器内路径> 指定，例如 DPanel 里是 /dpanel/compose/<项目>"
+    log "✗ Compose 项目目录不存在：$C_DIR"
+    log "    容器里跑时标签存的是宿主机路径：用 --compose-dir <容器内路径>（DPanel 是 /dpanel/compose/<项目>）"
     return 1
   fi
   # 标签里的文件路径可能是宿主机路径；文件不存在就让 compose 在目录里自己找。
@@ -787,31 +777,35 @@ compose_reclaim() {
     docker rmi "$_id" >/dev/null 2>&1 && _rec=$(( _rec + 1 ))
   done
 
-  [ "$_rec" -gt 0 ] && log "    回收旧镜像 $_rec 个（已无标签、无容器引用，本项目归属）"
+  [ "$_rec" -gt 0 ] && log "   回收旧镜像 $_rec 个"
   return 0
 }
 
 compose_update() {
-  log "MODE compose 项目=$COMPOSE_NAME"
   compose_locate || { EXIT_CODE=1; return 1; }
 
   _raw=$(compose_out "$(budget_timeout "$DP_T_CHECK")" config --images)
   _irc=$?
   _imgs=$(printf '%s\n' "$_raw" | awk 'NF && !seen[$0]++')
-  log "    目录=$C_DIR"
-  [ -n "$C_FILE" ] && log "    文件=$C_FILE"
+  _ni=0
+  [ -n "$_imgs" ] && _ni=$(printf '%s\n' "$_imgs" | grep -c .)
+  case "$_ni" in
+    0)   _desc="镜像清单读不出" ;;
+    1|2) _desc="$(printf '%s ' $_imgs | sed 's/ $//')" ;;
+    *)   _desc="$_ni 个镜像" ;;
+  esac
+  log "▶ compose $COMPOSE_NAME（预算 ${T_HARD}s）· $_desc"
+  [ -n "$_LOC_WARN" ] && log "WARN $_LOC_WARN"
+
   if [ "$_irc" -ne 0 ]; then
-    log "WARN docker compose config 没能读出这个项目的镜像清单（退出码 $_irc），继续按流程走"
-  fi
-  if [ -n "$_imgs" ]; then
-    printf '%s\n' "$_imgs" | while IFS= read -r _i; do
-      [ -n "$_i" ] && log "    镜像: $_i"
-    done
+    log "WARN docker compose config 读不出镜像清单（退出码 $_irc），继续按流程走"
   fi
 
   if [ "$DRY_RUN" = "1" ]; then
-    log "DRY 只检查不动手：上面是这个项目涉及的镜像，本轮不拉取、不部署"
-    log "    要真正更新就去掉 --dry-run（拉取本身就是「有没有新版本」的判断）"
+    [ "$_ni" -gt 2 ] && printf '%s\n' "$_imgs" | while IFS= read -r _i; do
+      [ -n "$_i" ] && log "      $_i"
+    done
+    log "DRY 只检查，不拉取也不部署（去掉 --dry-run 才会真正更新）"
     return 0
   fi
 
@@ -820,8 +814,7 @@ compose_update() {
     # 先判失败再打 WARN：log() 靠 EXIT_CODE 决定这句要不要进真 stderr（见文件头部说明）
     # 用 75（可重试）而不是 1：这一轮什么都没动，下一轮换个完整预算就能做完
     EXIT_CODE="$RETRY_EXIT"
-    log "WARN 剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不部署，项目保持原样"
-    log "     下一轮计划任务会重新检查；也可以把 T_HARD 或计划任务的超时调大"
+    log "WARN 剩余 ${_rest}s < ${DP_MIN_UPGRADE}s，本轮不部署：下一轮补做，或调大 T_HARD"
     return 1
   fi
 
@@ -829,23 +822,25 @@ compose_update() {
 
   # 1) 拉取。这一步同时也是「有没有新版本」的判断：没有新版时它是很快的空操作。
   _t=$(budget_timeout "$DP_T_PULL")
-  log "拉取镜像（docker compose pull，等待上限 ${_t}s）"
+  _p0=$(elapsed)
   _out=$(compose_run "$_t" pull)
   _rc=$?
+  _pd=$(( $(elapsed) - _p0 ))
   if [ "$_rc" -ne 0 ]; then
     if [ "$_rc" = "99" ]; then
-      log "ERR 无法进入 Compose 项目目录：$C_DIR"
+      log "✗ 无法进入 Compose 项目目录：$C_DIR"
       EXIT_CODE=1
     else
-      log "ERR 拉取失败（docker compose pull 退出码 $_rc），本轮不部署，项目保持原样"
-      printf '%s\n' "$_out" | tail -n5 | while IFS= read -r _nl; do log "    $_nl"; done
+      log "✗ 拉取失败（rc=$_rc，${_pd}s），项目未改动"
+      printf '%s\n' "$_out" | tail -n3 | while IFS= read -r _nl; do log "    $_nl"; done
       # 拉取失败绝大多数是网络/镜像仓库临时不可达 —— 换一轮就好的那种，用 75。
       # 目录错（99）上面已经单独处理成 1。
-      log "    拉取失败多为网络或镜像仓库暂时不可达：属于临时失败（退出码 75）"
+      log "    网络或镜像仓库不可达：属临时失败（75），下一轮再试"
       EXIT_CODE="$RETRY_EXIT"
     fi
     return 1
   fi
+  log "   拉取 ✓ ${_pd}s"
 
   # 拉取可能把这一轮预算花掉一大半：剩下的时间不够 up -d 的话，现在动手大概率被
   # 自己的 timeout 杀掉（拿到 137 → 判成 1），而「时间不够」明明是重试就能解决的。
@@ -854,30 +849,31 @@ compose_update() {
   _rest=$(left)
   if [ "$_rest" -lt "$DP_MIN_UPGRADE" ]; then
     EXIT_CODE="$RETRY_EXIT"
-    log "WARN 拉取已完成但剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不部署，项目保持原样"
-    log "     镜像已留在本地；下一轮会直接拿它们重建，时间够用"
+    log "WARN 拉取完只剩 ${_rest}s（< ${DP_MIN_UPGRADE}s），本轮不部署；镜像已在本地，下一轮直接重建"
     return 1
   fi
 
   # 2) 就地重新部署。不加 --remove-orphans：它会删掉不在当前 compose 文件里的容器。
   _t=$(budget_timeout "$DP_T_UP")
-  log "就地重新部署（docker compose up -d，等待上限 ${_t}s）"
+  _u0=$(elapsed)
   _out=$(compose_run "$_t" up -d)
   _rc=$?
+  _ud=$(( $(elapsed) - _u0 ))
   if [ "$_rc" -ne 0 ]; then
-    log "ERR 重新部署失败（docker compose up -d 退出码 $_rc）"
-    printf '%s\n' "$_out" | tail -n5 | while IFS= read -r _nl; do log "    $_nl"; done
+    log "✗ 重新部署失败（docker compose up -d，rc=$_rc，${_ud}s）"
+    printf '%s\n' "$_out" | tail -n3 | while IFS= read -r _nl; do log "    $_nl"; done
     case "$_rc" in
       124|137)
         # 被自己的 timeout 打断：不是 compose 的错，下一轮（预算完整）再 up -d 一次即可。
-        log "    重新部署被超时打断：属于临时失败（退出码 75），下一轮可以再试"
+        log "    被超时打断：属临时失败（75），下一轮可直接再跑"
         EXIT_CODE="$RETRY_EXIT" ;;
       *)
-        log "    compose 文件与容器定义都没被脚本改过，可以直接再跑一轮"
+        log "    compose 文件与容器定义都没被脚本改过，可直接再跑一轮"
         EXIT_CODE=1 ;;
     esac
     return 1
   fi
+  log "   部署 ✓ ${_ud}s"
 
   # 3) 如实报告：哪些容器换了镜像、哪些是这一轮新建的、有没有容器起不来。
   # 按**容器名**比对（见 compose_snapshot 的注释：重建后容器 ID 会变，用 ID 当键会把重建误判成新建）。
@@ -892,10 +888,8 @@ compose_update() {
     if [ -n "$_a" ] && [ -z "$_b" ]; then
       # 部署前没有这个容器：它是这一轮新建的（首次部署，或 compose 文件里新加的服务）。
       _new=$(( _new + 1 ))
-      log "    新建：$_nm（$(_short_id "$_a")）"
     elif [ -n "$_b" ] && [ -n "$_a" ] && [ "$_b" != "$_a" ]; then
       _changed=$(( _changed + 1 ))
-      log "    已重建：$_nm（$(_short_id "$_b") → $(_short_id "$_a")）"
     fi
   done
 
@@ -904,22 +898,22 @@ compose_update() {
 
   # 汇总要如实：换了镜像 / 新建 / 真的什么都没变，是三件不同的事，不能混成一句话。
   if [ "$_changed" -gt 0 ] && [ "$_new" -gt 0 ]; then
-    log "OK Compose 项目 $COMPOSE_NAME 已重新部署（$_changed/$_tot 个容器换了镜像，$_new 个新建）"
+    _res="重建 $_changed/$_tot · 新建 $_new"
   elif [ "$_changed" -gt 0 ]; then
-    log "OK Compose 项目 $COMPOSE_NAME 已重新部署（$_changed/$_tot 个容器换了镜像）"
+    _res="重建 $_changed/$_tot"
   elif [ "$_new" -gt 0 ]; then
-    log "OK Compose 项目 $COMPOSE_NAME 已部署（$_new 个容器新建）"
+    _res="新建 $_new"
   else
-    log "OK Compose 项目 $COMPOSE_NAME 已是最新（拉取后没有容器需要重建）"
+    _res="已是最新"
   fi
 
   if [ "$_tot" -gt 0 ] && [ "$_run" != "$_tot" ]; then
-    log "ERR 有容器没在运行（$_run/$_tot running）："
+    log "✗ 有容器没在运行（$_run/$_tot）："
     for _id in $(compose_cids); do
       _st=$(docker inspect -f '{{.State.Status}}' "$_id" 2>/dev/null)
       [ "$_st" = "running" ] || log "    $(docker inspect -f '{{.Name}}' "$_id" 2>/dev/null | sed 's|^/||') $_st"
     done
-    log "    compose 文件没被改过；用 docker compose logs <服务名> 看具体原因"
+    log "    compose 文件没改过；看 docker compose logs <服务名>"
     EXIT_CODE=1
     return 1
   fi
@@ -930,10 +924,10 @@ compose_update() {
   if [ "$(left)" -ge 20 ]; then
     compose_reclaim "$_imgs"
   else
-    log "    剩余时间不足，跳过旧镜像回收（不影响本次部署结果）"
+    log "   剩余时间不足，跳过旧镜像回收"
   fi
 
-  log "    运行状态：$_run/$_tot"
+  log "✓ 完成 $(elapsed)s · $_res · 运行 $_run/$_tot"
   return 0
 }
 
@@ -949,9 +943,7 @@ if [ -n "$DOCKER_SOCK" ]; then
   export DOCKER_HOST="unix://$DOCKER_SOCK"
 fi
 
-# 每次真实运行都在日志里留一行版本号：排查历史问题时，能立刻看出那一轮
-# 跑的是哪一版脚本（升级过 latest 之后尤其重要）。
-log "container-autoupdate 启动（本轮预算 ${T_HARD}s）"
+# 每轮的第一行由分支自己打（▶ 目标 + 本轮预算），不再单独打一行「启动」。
 
 # 目标判定（依赖检查与后面的分支都要用）
 _GOAL=""
@@ -967,11 +959,10 @@ case "$_GOAL" in
   compose)   compose_update ;;
   container) container_update ;;
   *)
-    log "ERR 必须且只能指定一个目标：--compose <项目名> 或 --container <容器名>"
-    log "    也可以用环境变量 UPD_COMPOSE / UPD_CONTAINER，或改文件顶部配置区"
+    log "✗ 必须且只能指定一个目标：--compose <项目名> 或 --container <容器名>"
+    log "    也可用 UPD_COMPOSE / UPD_CONTAINER 环境变量，或改文件顶部配置区"
     EXIT_CODE=1
     ;;
 esac
 
-log "本轮结束，总耗时 $(elapsed)s"
 exit "$EXIT_CODE"

@@ -17,7 +17,7 @@ FORCE=0
 PRUNE=1
 
 die() {
-    echo "[错误] $*" >&2
+    echo "✗ $*" >&2
     exit 1
 }
 
@@ -102,92 +102,57 @@ if [ -f /.dockerenv ]; then
     fi
 fi
 
-echo "================================="
-echo "   DPanel 更新脚本"
-echo "================================="
-echo ""
+_t0=$(date +%s)
+el() { echo $(( $(date +%s) - _t0 )); }
 
-if [ "$FORCE" -eq 1 ]; then
-    echo "[模式] 强制重建模式"
-else
-    echo "[模式] 普通更新模式"
-fi
-echo ""
-
-# 检查网络
-echo "[1/9] 检查 Docker 网络..."
+# 前置检查只在失败时说话：网络/数据目录不对，下面每一步都做不成，没必要先报一遍「正常」。
 docker network inspect "$NETWORK" >/dev/null 2>&1 || die "Docker 网络不存在: $NETWORK"
-echo "网络正常"
-echo ""
-
-# 检查数据目录
-echo "[2/9] 检查数据目录..."
 [ -d "$DATA_DIR" ] || die "数据目录不存在: $DATA_DIR"
-echo "数据目录正常"
-echo ""
 
-# 获取当前容器信息（可能不存在）
-echo "[3/9] 获取当前容器信息..."
+# 当前容器（可能不存在）
 CONTAINER_EXISTS=0
 OLD_IMAGE_ID=""
-
 if docker inspect "$CONTAINER" >/dev/null 2>&1; then
     CONTAINER_EXISTS=1
     OLD_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
-    echo "检测到已有容器: $CONTAINER"
-    if [ -n "$OLD_IMAGE_ID" ]; then
-        echo "当前镜像ID:"
-        echo "$OLD_IMAGE_ID"
-    fi
-else
-    echo "[提示] 未检测到容器: $CONTAINER"
-    echo "将直接创建新容器"
 fi
-echo ""
 
-# 拉取最新镜像
-echo "[4/9] 拉取最新镜像..."
-if ! docker pull "$IMAGE"; then
-    echo "[错误] 镜像拉取失败"
+# 第一行就说清「在干啥」：哪个容器、哪个镜像、什么网络、要不要强制重建
+_desc="$IMAGE · $NETWORK"
+[ -n "$STATIC_IP" ] && _desc="$_desc · 静态 IP $STATIC_IP"
+[ "$FORCE" -eq 1 ] && _desc="$_desc · 强制重建"
+echo "▶ 更新 $CONTAINER（$_desc）"
+
+if [ "$CONTAINER_EXISTS" -eq 1 ] && [ "$NETWORK" = "bridge" ] && [ -z "$STATIC_IP" ]; then
+    echo "WARN 按 bridge + 动态 IP 重建；原容器若用自定义网络/固定 IP，请显式传 --network/--ip"
+fi
+
+# 拉取：docker pull 的进度是每层一行，成功时全吞掉，失败时才把最后几行给出来
+_p0=$(el)
+_pull=$(docker pull "$IMAGE" 2>&1)
+_prc=$?
+_pd=$(( $(el) - _p0 ))
+if [ "$_prc" -ne 0 ]; then
+    echo "✗ 拉取镜像失败（${_pd}s）：$IMAGE" >&2
+    printf '%s\n' "$_pull" | tr '\r' '\n' | awk 'NF' | tail -n3 | while IFS= read -r _nl; do echo "    $_nl" >&2; done
     exit 75
 fi
+echo "   拉取 ✓ ${_pd}s"
 
-NEW_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null) || die "获取最新镜像失败"
-[ -n "$NEW_IMAGE_ID" ] || die "获取最新镜像失败"
-
-echo ""
-echo "最新镜像ID:"
-echo "$NEW_IMAGE_ID"
-echo ""
+NEW_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null) || die "读不出刚拉取镜像的 ID"
+[ -n "$NEW_IMAGE_ID" ] || die "读不出刚拉取镜像的 ID"
 
 # 普通模式：容器存在且镜像一致时直接结束
 if [ "$FORCE" -eq 0 ] && [ "$CONTAINER_EXISTS" -eq 1 ] && [ -n "$OLD_IMAGE_ID" ] \
     && [ "$OLD_IMAGE_ID" = "$NEW_IMAGE_ID" ]; then
-    echo "[提示] 当前已经是最新版本"
+    echo "✓ 完成 $(el)s · 已是最新（镜像没变；--force 可强制重建）"
     exit 0
 fi
 
-if [ "$CONTAINER_EXISTS" -eq 1 ] && [ "$NETWORK" = "bridge" ] && [ -z "$STATIC_IP" ]; then
-    echo "[提示] 按默认 bridge + 动态 IP 重建；原容器若用了自定义网络/固定 IP，请显式传 --network/--ip"
-    echo ""
-fi
-
-# 停止 / 删除旧容器（仅在存在时执行）
+# 停 / 删旧容器（没有旧容器就跳过，不专门报一句「跳过」）
 if [ "$CONTAINER_EXISTS" -eq 1 ]; then
-    echo "[5/9] 停止旧容器..."
     docker stop "$CONTAINER" >/dev/null 2>&1 || die "停止旧容器失败"
-    echo "旧容器已停止"
-    echo ""
-
-    echo "[6/9] 删除旧容器..."
     docker rm "$CONTAINER" >/dev/null 2>&1 || die "删除旧容器失败"
-    echo "旧容器已删除"
-    echo ""
-else
-    echo "[5/9] 无旧容器，跳过停止"
-    echo ""
-    echo "[6/9] 无旧容器，跳过删除"
-    echo ""
 fi
 
 # 用当前配置启动指定镜像
@@ -217,73 +182,58 @@ run_container() {
 }
 
 rollback() {
-    echo ""
-    echo "正在尝试回滚到旧镜像..."
-
     if [ "$CONTAINER_EXISTS" -eq 1 ] && [ -n "$OLD_IMAGE_ID" ]; then
         docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-        if run_container "$OLD_IMAGE_ID"; then
-            echo ""
-            echo "[回滚成功] 已恢复旧版本"
+        if run_container "$OLD_IMAGE_ID" >/dev/null 2>&1; then
+            echo "   已回滚到旧镜像，$CONTAINER 仍可用" >&2
         else
-            echo ""
-            echo "[严重错误] 回滚失败"
+            echo "   回滚也失败：$CONTAINER 现在没有运行，只能手动 docker run 起一份" >&2
         fi
     else
-        echo "无旧版本可回滚，请检查上面的错误信息"
+        echo "   原本没有旧容器，无需回滚" >&2
     fi
 }
 
-# 创建新容器
-echo "[7/9] 创建新容器..."
-if ! run_container "$IMAGE"; then
-    echo ""
-    echo "[错误] 新容器启动失败"
+# 创建新容器（docker run 成功时不打一句话；失败时把它骂的原话给出来）
+_r0=$(el)
+_run_out=$(run_container "$IMAGE" 2>&1)
+_rrc=$?
+if [ "$_rrc" -ne 0 ]; then
+    echo "✗ 新容器启动失败（docker run rc=$_rrc）" >&2
+    printf '%s\n' "$_run_out" | awk 'NF' | tail -n3 | while IFS= read -r _nl; do echo "    $_nl" >&2; done
     rollback
     exit 1
 fi
 
-# 等待启动
-echo ""
-echo "[8/9] 等待容器启动..."
 sleep "$WAIT"
-
 _RUNNING=$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)
 if [ "$_RUNNING" != "true" ]; then
-    echo "[错误] 容器未成功运行"
+    echo "✗ 容器没跑起来（等了 ${WAIT}s，State.Running=${_RUNNING:-空}）" >&2
     rollback
     exit 1
 fi
+_rd=$(( $(el) - _r0 ))
+echo "   重建 ✓ ${_rd}s"
 
-echo "容器运行正常"
-echo ""
+[ "$PRUNE" -eq 1 ] && docker image prune -f >/dev/null 2>&1
 
-# 清理无用镜像
-if [ "$PRUNE" -eq 1 ]; then
-    echo "[9/9] 清理无用镜像..."
-    docker image prune -f >/dev/null 2>&1 || true
-else
-    echo "[9/9] 跳过清理无用镜像"
-fi
-
-echo ""
-echo "================================="
-echo " DPanel 更新完成"
-echo "================================="
-echo ""
-
-docker ps | grep "$CONTAINER"
-
-echo ""
-echo "DPanel 地址:"
+# 收尾一行给结果：做了什么 + 从哪访问（原来还要 docker ps | grep 一遍，那是给自己看的噪音）
 if [ -n "$STATIC_IP" ]; then
-    echo "http://$STATIC_IP:8080"
+    _url="http://$STATIC_IP:8080"
 else
     _ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER" 2>/dev/null || true)
-    if [ -n "$_ip" ]; then
-        echo "http://$_ip:8080"
-    else
-        echo "http://<容器IP>:8080"
-    fi
+    # 容器没在运行时 docker 用 "invalid IP" 当占位符，别把它当地址印出来
+    case "$_ip" in "invalid IP") _ip="" ;; esac
+    if [ -n "$_ip" ]; then _url="http://$_ip:8080"; else _url="http://<容器IP>:8080"; fi
 fi
-echo ""
+
+# 收尾前再看一眼还在不在跑：ENTRYPOINT 一跑就结束的镜像，上面那次检查可能刚好撞在
+# 「还活着」的一瞬间，这时候报「完成」就是骗人。
+_st=$(docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)
+if [ "$_st" != "true" ]; then
+    echo "✗ 容器起来又退了（$(el)s，State.Running=${_st:-空}）· $_url" >&2
+    exit 1
+fi
+
+if [ "$CONTAINER_EXISTS" -eq 1 ]; then _act="已重建"; else _act="已新建"; fi
+echo "✓ 完成 $(el)s · $_act · $_url"

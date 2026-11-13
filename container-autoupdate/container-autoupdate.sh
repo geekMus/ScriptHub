@@ -256,6 +256,7 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   DRY_RUN=1                     同 --dry-run
   T_HARD                        整轮时间硬上限（秒）；不给时若环境里有 RETRY_TIMEOUT
                                 就取 RETRY_TIMEOUT-15（最小 60），都没有才用 540
+                                经验值：外层 retry.sh 用 -x 180（慢拉取也够部署）
   T_INSPECT / DP_T_CHECK        单次「检查」调用超时（秒，默认 120）
   DP_T_UPGRADE                  单次容器升级调用超时（秒，默认 420）
   DP_T_PULL / DP_T_UP           Compose 模式的 pull / up -d 超时（秒，默认 420 / 180）

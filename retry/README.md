@@ -51,7 +51,7 @@ Lucky 对每轮脚本只有 **15 秒**。单次部署约 5 秒，两轮加间隔
 
 ```sh
 sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u \
-  "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh" \
+  "https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh" \
   -- --token "..." --account "..." --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
 ```
 
@@ -64,14 +64,14 @@ sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u \
 ```sh
 R=/tmp/retry.sh
 curl -fsSL --http1.1 --max-time 30 \
-  "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
+  "https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
   -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
 sh "$R" -n 3 -i 2 -d 20 -x 150 \
-  -u "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
+  -u "https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
   -- --compose magpie_gateway
 ```
 
-两个地址都是完整的文件地址，不拼变量、不写相对路径。只走 `github.mus.pp.ua` 一个加速站（后面接完整的 `https://raw.githubusercontent.com/...`；不要用 `github.com/.../raw/`，那个形式会被缓存旧版本）。
+两个地址都是完整的文件地址，不拼变量、不写相对路径。直接用 `https://raw.githubusercontent.com/...` 的完整地址；不要用 `github.com/.../raw/`，那个形式会被缓存旧版本。
 
 `container-autoupdate.sh` 自己会用退出码区分：拉取镜像失败、Docker 暂时连不上 → `75`（值得再跑一轮）；compose 文件错、目标不存在、目录不存在 → `1`（停下来）。所以 DPanel 里的 3 次重试只会在真正有用的时候发生。
 

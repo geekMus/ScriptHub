@@ -43,14 +43,14 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 ```sh
 R=/tmp/retry.sh
 curl -fsSL --http1.1 --max-time 30 \
-  "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
+  "https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
   -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
 sh "$R" -n 3 -i 2 -d 20 -x 150 \
-  -u "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
+  -u "https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
   -- --compose myapp
 ```
 
-两个地址都写**完整地址**，不拼变量、不写相对路径。只走 `github.mus.pp.ua` 一个加速站（后面接完整的 `https://raw.githubusercontent.com/...`；不要用 `github.com/.../raw/`，那个形式会被缓存旧版本）。
+两个地址都写**完整地址**，不拼变量、不写相对路径。直接用 `https://raw.githubusercontent.com/...` 的完整地址；不要用 `github.com/.../raw/`，那个形式会被缓存旧版本。
 
 这条命令的行为：
 

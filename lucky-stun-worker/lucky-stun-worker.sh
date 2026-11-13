@@ -26,7 +26,11 @@
 #   sh /app/conf/lucky-stun-worker.sh --token "..." --account "..." \
 #      --domain "mus.pp.ua" --suffix "rt.mus.pp.ua" --port "${port}"
 #
-# 退出码：成功 0；参数缺失、部署失败 1。
+# 退出码（给 retry.sh 用）：
+#   0   部署成功
+#   75  临时失败：连不上 api.cloudflare.com、请求超时、CF 返回 5xx/429
+#       —— 链路抖一下就能好，外层 retry.sh 只认这个码才会再试
+#   1   配置/鉴权/参数错误，或 CF 明确拒绝（4xx）：重试没有意义
 # ============================================================================
 
 TOKEN="${CF_WORKER_API_TOKEN:-}"
@@ -257,7 +261,7 @@ fi
 # 部署 Worker（单次；需要重试请用 retry/retry.sh 包一层）
 # ============================================================================
 
-RESULT=$(curl -sS --connect-timeout 2 --max-time 5 -X PUT \
+RESP=$(curl -sS --connect-timeout 2 --max-time 5 -w '\n%{http_code}' -X PUT \
     "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/workers/scripts/${WORKER}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/javascript" \
@@ -266,15 +270,29 @@ CURL_RC=$?
 
 if [ "${CURL_RC}" -ne 0 ]; then
     echo "❌ 请求失败（curl 退出码 ${CURL_RC}）：连不上 api.cloudflare.com 或超时"
-    echo "${RESULT}"
-    exit 1
+    printf '%s\n' "${RESP}" | sed '$d'
+    echo "   属于临时失败（退出码 75），外层 retry.sh 会再试"
+    exit 75
 fi
 
-if echo "${RESULT}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+# curl -w 把 HTTP 状态码追加在响应体最后一行，单独拆出来
+HTTP=$(printf '%s\n' "${RESP}" | tail -n1)
+BODY=$(printf '%s\n' "${RESP}" | sed '$d')
+
+if printf '%s\n' "${BODY}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
     echo "✅ Worker 部署成功（${SUFFIX}:${PORT}）"
     exit 0
 fi
 
-echo "❌ Worker 部署失败"
-echo "${RESULT}"
+case "${HTTP}" in
+    429|5??)
+        echo "❌ Worker 部署失败（HTTP ${HTTP}）：Cloudflare 侧临时错误或限流"
+        printf '%s\n' "${BODY}"
+        echo "   属于临时失败（退出码 75），外层 retry.sh 会再试"
+        exit 75
+        ;;
+esac
+
+echo "❌ Worker 部署失败（HTTP ${HTTP}）：参数/鉴权问题，重试没有意义"
+printf '%s\n' "${BODY}"
 exit 1

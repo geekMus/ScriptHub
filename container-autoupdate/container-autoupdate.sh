@@ -103,6 +103,12 @@ DP_T_UP="${DP_T_UP:-180}"            # Compose 模式：单次 `docker compose u
 DP_MIN_UPGRADE="${DP_MIN_UPGRADE:-90}" # 剩余预算低于这个值就不动手，避免被计划任务半路杀掉
 DRY_RUN="${DRY_RUN:-0}"
 EXIT_CODE=0
+# 可重试退出码：75 = 临时失败（网络不通、请求超时、镜像仓库暂时不可达）。
+# 外层 retry/retry.sh 只在看到 75（或 124/137 超时）时才再跑一轮；其它非 0
+# 一律视为「重试没意义」，立即结束。
+# 判定原则：换成 5 秒后再跑一次有可能成功的，才算 75；配置错、目标不存在、
+# 鉴权失败、compose 文件写错 —— 全部用 1，别用 75。
+RETRY_EXIT=75
 
 now()     { date +%s; }
 elapsed() { echo $(( $(now) - START )); }
@@ -378,7 +384,8 @@ check_deps() {
     if ! timeout -s KILL 20 docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       echo "ERR 无法连接 Docker（DOCKER_HOST=${DOCKER_HOST:-未设置}）" >&"$ERR_FD"
       echo "    请确认 Docker 正在运行，且当前用户有权限访问 socket" >&"$ERR_FD"
-      exit 1
+      echo "    Docker 正在重启时也长这样：属于临时失败（退出码 75），外层可再试" >&"$ERR_FD"
+      exit "$RETRY_EXIT"
     fi
   fi
   if [ "$_GOAL" = "compose" ]; then
@@ -416,12 +423,18 @@ check_deps() {
 container_update() {
   log "MODE container 容器=$CONTAINER_NAME"
   _out=$(dp_cli "$(dp_timeout "$DP_T_CHECK")" container:upgrade --name "$CONTAINER_NAME" --docker-env "$DPANEL_DOCKER_ENV")
+  _rc=$?
   _j=$(dp_json "$_out")
   if [ -z "$_j" ]; then
     log "ERR DPanel 没有返回可解析的结果（container:upgrade --name $CONTAINER_NAME）"
     dp_noise "$_out" | while IFS= read -r _nl; do log "    $_nl"; done
     log "    容器未做任何改动"
-    EXIT_CODE=1
+    if [ "$_rc" = "124" ] || [ "$_rc" = "137" ]; then
+      log "    DPanel 调用超时（退出码 $_rc）：属于临时失败（退出码 75）"
+      EXIT_CODE="$RETRY_EXIT"
+    else
+      EXIT_CODE=1
+    fi
     return 1
   fi
   if dp_failed "$_j"; then
@@ -451,12 +464,18 @@ container_update() {
   _t=$(dp_timeout "$DP_T_UPGRADE")
   log "交给 DPanel 升级（等待上限 ${_t}s；新容器起不来时 DPanel 会自行回滚）"
   _out2=$(dp_cli "$_t" container:upgrade --name "$CONTAINER_NAME" --upgrade --docker-env "$DPANEL_DOCKER_ENV")
+  _rc2=$?
   _j2=$(dp_json "$_out2")
   if [ -z "$_j2" ]; then
     log "ERR DPanel 升级没有返回可解析的结果（可能等待超时，或 DPanel 侧出错）"
     dp_noise "$_out2" | while IFS= read -r _nl; do log "    $_nl"; done
     log "    容器保持原样；DPanel 若已重建过会自行回滚（备份容器 <容器名>-bak-<时间戳>）"
-    EXIT_CODE=1
+    if [ "$_rc2" = "124" ] || [ "$_rc2" = "137" ]; then
+      log "    DPanel 调用超时（退出码 $_rc2）：属于临时失败（退出码 75）"
+      EXIT_CODE="$RETRY_EXIT"
+    else
+      EXIT_CODE=1
+    fi
     return 1
   fi
   if dp_failed "$_j2"; then
@@ -703,11 +722,15 @@ compose_update() {
   if [ "$_rc" -ne 0 ]; then
     if [ "$_rc" = "99" ]; then
       log "ERR 无法进入 Compose 项目目录：$C_DIR"
+      EXIT_CODE=1
     else
       log "ERR 拉取失败（docker compose pull 退出码 $_rc），本轮不部署，项目保持原样"
       printf '%s\n' "$_out" | tail -n5 | while IFS= read -r _nl; do log "    $_nl"; done
+      # 拉取失败绝大多数是网络/镜像仓库临时不可达 —— 换一轮就好的那种，用 75。
+      # 目录错（99）上面已经单独处理成 1。
+      log "    拉取失败多为网络或镜像仓库暂时不可达：属于临时失败（退出码 75）"
+      EXIT_CODE="$RETRY_EXIT"
     fi
-    EXIT_CODE=1
     return 1
   fi
 

@@ -273,6 +273,7 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   #   执行 150 秒；脚本里不写 --max-time。--http1.1 是为了扛偶发的 TLS 抖动。
   RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
   TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+  # 本地已有一份时改成：TARGET="/opt/scripts/container-autoupdate.sh"
   RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
   TARGET_ARGS="--compose myapp"
 

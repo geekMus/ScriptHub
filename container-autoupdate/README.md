@@ -16,8 +16,9 @@ Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已
 ```sh
 # 1) 重试脚本地址
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-# 2) 目标：远程地址或本地脚本路径都行
+# 2) 目标：远程地址（只下载一次）或本地脚本路径，二选一
 TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+# 本地已有一份时改成：TARGET="/opt/scripts/container-autoupdate.sh"
 # 3) 重试脚本自己的参数
 RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
 # 4) 目标脚本的参数：--compose <项目名> 或 --container <容器名>
@@ -28,7 +29,7 @@ curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
 sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
 ```
 
-- 远程目标只下载一次、校验语法后反复执行；只有 `75`（和 124/137）才重试，参数错/目录错第一轮就结束。
+- 目标写远程地址时只下载一次、校验语法后反复执行；写本地路径时 retry 直接执行本地文件，不下载。只有 `75`（和 124/137）才重试，参数错/目录错第一轮就结束。
 - `retry.sh` 用 `RETRY_TIMEOUT` 告诉脚本执行上限，脚本据此把整轮预算压到 135 秒并留 15 秒收尾，不会在拉镜像途中被外部 KILL。
 - 最坏不到 480 秒（下载最多重试两次 + 三次执行各 135 秒），压得住 DPanel 的 600 秒；慢网络下「拉完但没时间 up -d」会用 `75` 收手，下一轮 pull 是空操作。
 - 脚本内部每次调 `docker` / DPanel CLI 也带超时，并且和 `retry.sh` 一样按整组收尾：compose 插件这类孙进程不会变成孤儿把任务吊住。

@@ -15,16 +15,28 @@
 
 ## 用法
 
-```sh
-# 跑本地命令
-sh retry.sh -n 3 -i 2 -- sh /opt/backup.sh /data
+把下面整段填进需要重试的位置（DPanel 计划任务的「脚本」框、Lucky 规则脚本等），换掉两个地址即可：
 
-# 跑远程脚本：只下载一次，然后反复执行（重试不再重新下载）
-# 远程脚本地址（换镜像只改这一行；要写 raw.githubusercontent.com 的完整地址）
+```sh
+# 两个地址（换镜像就改这两行；要写 raw.githubusercontent.com 的完整地址）
+RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
-sh retry.sh -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" \
-  -- --compose magpie_gateway
+
+# 执行参数（按需改）
+RETRY_N=3                 # 最多执行几次
+RETRY_INTERVAL=2          # 两次之间等几秒
+DOWNLOAD_TIMEOUT=20       # 下载目标脚本的超时（秒，0 = 不限）
+EXEC_TIMEOUT=150          # 单次执行的超时（秒，0 = 不限）
+TARGET_ARGS="--compose myapp"   # 目标脚本自己的参数，按空格写
+
+R=/tmp/retry.sh
+curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
+  || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+sh "$R" -n "$RETRY_N" -i "$RETRY_INTERVAL" -d "$DOWNLOAD_TIMEOUT" -x "$EXEC_TIMEOUT" \
+  -u "$TARGET_URL" -- $TARGET_ARGS
 ```
+
+`TARGET_ARGS` 故意不加引号：按空格拆成多个参数传给目标脚本；目标脚本不需要参数就留空。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |

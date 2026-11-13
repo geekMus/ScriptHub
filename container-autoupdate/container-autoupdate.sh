@@ -187,6 +187,8 @@ log() {
 # 镜像层已经在本地，下一轮不会再下载。
 on_signal() {
   trap - TERM INT HUP
+  # 内部调用可能跑在自己的会话里（run_bounded 用 setsid），退出前先把它们收掉
+  [ -n "${_bpid:-}" ] && kill -TERM "-${_bpid}" 2>/dev/null
   EXIT_CODE="$RETRY_EXIT"
   log "WARN 收到 SIG$1，提前结束（已跑 $(elapsed)s / 上限 ${T_HARD}s）"
   log "     本轮没做完的动作下一轮会接着做；已拉下来的镜像层不重复下载"
@@ -325,6 +327,50 @@ parse_args() {
   fi
 }
 
+# ---------- 内部调用的超时：整组收尾 ----------
+# 内部调用（DPanel CLI、docker compose）也会派生孙进程：docker CLI 会把 compose
+# 插件当子进程跑，docker exec 后面还有容器里的进程。busybox 的 timeout 只杀直接
+# 子进程，插件/子进程会变成孤儿继续占着输出管道（N1 实测过：脚本 30 秒就结束了，
+# 计划任务却等满 425 秒）。所以这里和 retry.sh 用同一套做法：有 setsid 就单独开
+# 一个会话，到点先 TERM 整组、2 秒后 KILL；没有 setsid 才退回 timeout -s KILL。
+HAVE_SETSID=0
+command -v setsid >/dev/null 2>&1 && HAVE_SETSID=1
+
+# $1 = 超时秒数，其余 = 要执行的命令。退出码：超时统一 124，其它原样返回。
+run_bounded() {
+  _bt="$1"; shift
+  if [ "${HAVE_SETSID}" = "1" ]; then
+    setsid "$@" &
+    _bpid=$!
+    # watchdog 的输出全部丢掉：它不能占着调用方的 stdout，否则 $(...) 会等它退出
+    (
+      _n=0
+      while [ "$_n" -lt "$_bt" ]; do
+        sleep 1
+        kill -0 "$_bpid" 2>/dev/null || exit 0
+        _n=$(( _n + 1 ))
+      done
+      kill -TERM "-$_bpid" 2>/dev/null
+      _g=0
+      while [ "$_g" -lt 2 ]; do
+        kill -0 "$_bpid" 2>/dev/null || exit 0
+        sleep 1
+        _g=$(( _g + 1 ))
+      done
+      kill -KILL "-$_bpid" 2>/dev/null
+    ) >/dev/null 2>&1 &
+    wait "$_bpid"
+    _brc=$?
+    _bpid=""
+    case "$_brc" in 137|143) _brc=124 ;; esac
+    return "$_brc"
+  fi
+  timeout -s KILL "$_bt" "$@"
+  _brc=$?
+  case "$_brc" in 137|143) _brc=124 ;; esac
+  return "$_brc"
+}
+
 # ---------- 与 DPanel 打交道 ----------
 # 两种运行方式，效果完全一样（同一个二进制、同一份 config、同一个 docker socket）：
 #   1) 脚本本来就在 DPanel 容器里（计划任务的常见情形）→ 直接执行二进制；
@@ -339,9 +385,9 @@ DP_IN_CONTAINER=0
 dp_cli() {
   _dt="$1"; shift
   if [ "$DP_IN_CONTAINER" = "1" ]; then
-    timeout -s KILL "$_dt" "$DPANEL_BIN" "$@" 2>&1
+    run_bounded "$_dt" "$DPANEL_BIN" "$@" 2>&1
   else
-    timeout -s KILL "$_dt" docker exec "$DPANEL_NAME" "$DPANEL_BIN" "$@" 2>&1
+    run_bounded "$_dt" docker exec "$DPANEL_NAME" "$DPANEL_BIN" "$@" 2>&1
   fi
 }
 
@@ -402,9 +448,13 @@ check_deps() {
   # 那才是用户真正要处理的问题；这时先报「缺少 docker」只会把人带偏。
   [ -z "${_GOAL:-}" ] && return 0
   _missing=""
-  for _b in timeout sed awk grep; do
+  for _b in sed awk grep; do
     command -v "$_b" >/dev/null 2>&1 || _missing="$_missing $_b"
   done
+  # 超时要么靠 setsid + watchdog，要么退回 timeout；两者都没有就做不了超时
+  if [ "${HAVE_SETSID}" != "1" ] && ! command -v timeout >/dev/null 2>&1; then
+    _missing="$_missing timeout(或 setsid)"
+  fi
   # 什么时候需要 docker CLI：
   #   · Compose 分支要自己调 `docker compose`；
   #   · 容器分支在 DPanel 容器里跑时，用 `docker exec` 进 DPanel（所以也需要）；
@@ -416,14 +466,14 @@ check_deps() {
   fi
   if [ -n "$_missing" ]; then
     echo "ERR 缺少依赖命令：$_missing" >&"$ERR_FD"
-    echo "    需要 timeout 与 busybox 或 coreutils 基础工具；" >&"$ERR_FD"
+    echo "    需要 timeout 或 setsid，以及 busybox/coreutils 的 sed、awk、grep；" >&"$ERR_FD"
     echo "    Compose 模式还需要 docker（含 docker compose 插件）；不在 DPanel 容器里跑时也需要 docker" >&"$ERR_FD"
     exit 1
   fi
   if [ "$_need_docker" = "1" ]; then
     # 要用 docker 就先验证它真的连得上：连不上时报「找不到 DPanel CLI」
     # 会把人引到完全无关的排查方向（AGENTS.md 记过这个坑）。
-    if ! timeout -s KILL 20 docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    if ! run_bounded 20 docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       echo "ERR 无法连接 Docker（DOCKER_HOST=${DOCKER_HOST:-未设置}）" >&"$ERR_FD"
       echo "    请确认 Docker 正在运行，且当前用户有权限访问 socket" >&"$ERR_FD"
       echo "    Docker 正在重启时也长这样：属于临时失败（退出码 75），外层可再试" >&"$ERR_FD"
@@ -432,7 +482,7 @@ check_deps() {
   fi
   if [ "$_GOAL" = "compose" ]; then
     # Compose 分支的更新动作全靠 compose 插件，它不可用就没必要继续。
-    if ! timeout -s KILL 20 docker compose version >/dev/null 2>&1; then
+    if ! run_bounded 20 docker compose version >/dev/null 2>&1; then
       echo "ERR 无法执行 docker compose（缺 compose 插件？）" >&"$ERR_FD"
       echo "    Compose 模式需要 Docker Compose v2 插件版（docker compose，不是 docker-compose）" >&"$ERR_FD"
       exit 1
@@ -562,7 +612,7 @@ compose_run() {
   _t="$1"; shift
   ( cd "$C_DIR" 2>/dev/null || exit 99
     compose_env
-    timeout -s KILL "$_t" docker compose "$@" 2>&1 )
+    run_bounded "$_t" docker compose "$@" 2>&1 )
 }
 
 # 只要 stdout（stderr 丢掉）：给 `config --images` 这种要解析输出的调用用，
@@ -571,7 +621,7 @@ compose_out() {
   _t="$1"; shift
   ( cd "$C_DIR" 2>/dev/null || exit 99
     compose_env
-    timeout -s KILL "$_t" docker compose "$@" 2>/dev/null )
+    run_bounded "$_t" docker compose "$@" 2>/dev/null )
 }
 
 # 镜像 id 取短一点，日志里好读。

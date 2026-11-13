@@ -27,22 +27,15 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）：
 
 ```sh
-G=https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
-SRC='https://gh-proxy.com
-https://ghfast.top
-https://github.com'
+G=https://github.mus.pp.ua/https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
 T=/tmp/ct-new.sh
-okfile() { [ -f "$1" ] || return 1; [ "$(wc -c <"$1")" -gt 1000 ] && sh -n "$1" 2>/dev/null && grep -q container-autoupdate "$1"; }
-for u in $SRC; do
-  case "$u" in "https://github.com") url=$G ;; *) url="$u/$G" ;; esac
-  curl -fsSL --max-time 30 "$url" -o "$T" 2>/dev/null || continue
-  okfile "$T" && break
-done
-okfile "$T" || { echo "ERR 三个源都没拿到可用的脚本，本轮不更新" >&2; exit 1; }
+curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
+{ [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
+  || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
 sh "$T" --compose myapp
 ```
 
-`SRC` 的顺序是 gh-proxy 镜像 → ghfast 镜像 → 直连，第一个通过校验（大小 + `sh -n` + 内容标记）的生效。三个都不通就退出，不更新，也不会留下半截文件。
+只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://github.com/...` 整个拼在它后面），不备其他镜像；拉不到就退出、这一轮不更新，也不会留下半截文件。
 
 ## 退出码
 

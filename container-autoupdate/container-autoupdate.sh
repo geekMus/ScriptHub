@@ -231,21 +231,13 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
-  #   SRC 里一行一个源，只写站点域名；镜像站那条会拼成「站点/原始 GitHub 地址」，
-  #   https://github.com 那条是直连。按顺序试，第一个内容合格的才算成功；
-  #   全部失败就报错退出，本轮不更新（不留旧副本，每轮都拉最新的一份跑）。
-  G=https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
-  SRC='https://gh-proxy.com
-  https://ghfast.top
-  https://github.com'
+  #   只从一个地方拉：github.mus.pp.ua（自家 GitHub 加速）。地址要写完整，
+  #   把 https://github.com/... 整个拼在域名后面；拉不到就报错退出，本轮不更新。
+  G=https://github.mus.pp.ua/https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
   T=/tmp/ct-new.sh
-  okfile() { [ -f "$1" ] || return 1; [ "$(wc -c <"$1")" -gt 1000 ] && sh -n "$1" 2>/dev/null && grep -q container-autoupdate "$1"; }
-  for u in $SRC; do
-    case "$u" in "https://github.com") url=$G ;; *) url="$u/$G" ;; esac
-    curl -fsSL --max-time 30 "$url" -o "$T" 2>/dev/null || continue
-    okfile "$T" && break
-  done
-  okfile "$T" || { echo "ERR 三个源都没拿到可用的脚本，本轮不更新" >&2; exit 1; }
+  curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
+  { [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
+    || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
   sh "$T" --compose myapp
 
 USAGE

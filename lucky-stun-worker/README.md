@@ -4,12 +4,12 @@
 
 ## 谁在调用它
 
-**Lucky 自己。** STUN 穿透规则里那一栏「脚本」，只写一行调用，端口用 Lucky 的 `${port}` 占位符：
+**Lucky 自己。** STUN 穿透规则里那一栏「脚本」，只写一行调用，端口用 Lucky 的 `${port}` 占位符。下面的域名只是示例，换成自己的主域名和跳转后缀：
 
 ```sh
 sh /app/conf/lucky-stun-worker.sh \
   --token "$CF_WORKER_API_TOKEN" --account "$CF_ACCOUNT_ID" \
-  --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
+  --domain example.com --suffix rt.example.com --port "${port}"
 ```
 
 为什么不再放一个宿主机守护：Lucky 每次打洞成功只会通知一次，守护等于把同一件事重做一遍；而且它是「不行就再来」的逻辑，一旦端口没变、Worker 又落后，就会一直重试同一个旧端口。现在只保留一条链路——**Lucky 判断端口变了 → 调脚本 → 部署成功或失败**。失败时 Lucky 的界面日志会写清楚原因，下一次端口变化会自然重来。
@@ -32,15 +32,15 @@ Lucky 的规则脚本里再引用 `/app/conf/lucky-stun-worker.sh` 即可。不�
 | --- | --- | --- |
 | `--token` | `CF_WORKER_API_TOKEN` | CF API Token，权限 **Workers Scripts:Edit** |
 | `--account` | `CF_ACCOUNT_ID` | CF 账户 ID |
-| `--domain` | `BASE_DOMAIN` | 主域名，如 `mus.pp.ua` |
-| `--suffix` | `V4_SUFFIX` | IPv4 跳转后缀，如 `rt.mus.pp.ua` |
+| `--domain` | `BASE_DOMAIN` | 主域名，如 `example.com`（**必填**，没有默认值） |
+| `--suffix` | `V4_SUFFIX` | IPv4 跳转后缀，如 `rt.example.com`（**必填**，没有默认值） |
 | `--port` | `port` | 本次打洞的公网端口（Lucky 自动替换） |
 | `--worker` | `WORKER_NAME` | Worker 名，默认 `stun-redirect` |
 | `--v6-suffix` | `V6_SUFFIX` | 默认同 `--suffix` |
 | `--v6-port` | `V6_PORT` | 默认 `100` |
 | `--dry-run` | — | 只打印解析结果，不部署 |
 
-命令行参数优先于环境变量；什么参数都没给时，`${port}` 会原样留在脚本里——那样的值部署上去等于把 Worker 写坏，所以参数校验会直接拦下。
+命令行参数优先于环境变量。`--token`、`--account`、`--domain`、`--suffix`、`--port` 都没有内置默认值（`--domain`/`--suffix` 不会拿示例域名顶替）：少传任何一个，脚本就打印 `❌ 缺少参数：…` 并以退出码 `1` 结束，不会继续执行，更不会把示例域名部署上去。
 
 ## 退出码（给 retry.sh 用）
 
@@ -60,7 +60,7 @@ Lucky 对每轮脚本只有 **15 秒**硬超时（超了就是 `调用脚本失�
 sh /app/conf/retry.sh -n 2 -i 1 -x 3 -- \
   sh /app/conf/lucky-stun-worker.sh \
      --token "$CF_WORKER_API_TOKEN" --account "$CF_ACCOUNT_ID" \
-     --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
+     --domain example.com --suffix rt.example.com --port "${port}"
 ```
 
 这样只有「网络抖了一下」这种 75 才会再跑一轮；Token 写错、端口非法会在第一轮直接结束，Lucky 的界面日志里立刻能看到真正的原因。
@@ -70,8 +70,8 @@ sh /app/conf/retry.sh -n 2 -i 1 -x 3 -- \
 ## Cloudflare 侧要有
 
 1. 一个叫 `stun-redirect` 的 Worker（或 `--worker` 指定的名字）
-2. 路由把 `*.mus.pp.ua/*` 指过去
-3. DNS 给 `*.rt.mus.pp.ua` 建 **DNS only（灰云）** 的 A 记录，指向当前公网 IP（开橙云会形成跳转环路）
+2. 路由把 `*.example.com/*` 指过去（`example.com` 是占位，换成你自己的域名）
+3. DNS 给 `*.rt.example.com` 建 **DNS only（灰云）** 的 A 记录，指向当前公网 IP（开橙云会形成跳转环路）
 
 ## 出问题看这里
 

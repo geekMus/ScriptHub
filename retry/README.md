@@ -52,7 +52,7 @@ Lucky 对每轮脚本只有 **15 秒**。单次部署约 5 秒，两轮加间隔
 ```sh
 sh /app/conf/retry.sh -n 2 -i 1 -d 2 -x 3 -u \
   "https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh" \
-  -- --token "..." --account "..." --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
+  -- --token "..." --account "..." --domain example.com --suffix rt.example.com --port "${port}"
 ```
 
 `lucky-stun-worker.sh` 在连不上 CF、超时、CF 返回 5xx/429 时退出 `75`，所以这里只会为「真的可能好」的失败再跑一轮；参数写错时第一轮就结束。

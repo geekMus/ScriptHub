@@ -3,6 +3,7 @@
 # lucky-stun-worker —— 把打洞端口部署进 Cloudflare Worker 的单文件脚本
 #
 # 它自己不带任何配置：需要的值全部从命令行参数（或同名环境变量）拿。
+# domain / suffix 没有内置默认值，缺了就直接报「缺少参数」并以 exit 1 结束。
 #
 # 用法：
 #   lucky-stun-worker.sh --token <TOKEN> --account <ACCOUNT_ID> \
@@ -24,7 +25,7 @@
 # 在 Lucky 里用：把本文件放进容器（例如 /root/lucky/conf/ 挂载到 /app/conf/），
 # 脚本框只写一行调用，端口用 Lucky 的 ${port} 占位符：
 #   sh /app/conf/lucky-stun-worker.sh --token "..." --account "..." \
-#      --domain "mus.pp.ua" --suffix "rt.mus.pp.ua" --port "${port}"
+#      --domain "example.com" --suffix "rt.example.com" --port "${port}"
 #
 # 退出码（给 retry.sh 用）：
 #   0   部署成功
@@ -60,7 +61,7 @@ while [ $# -gt 0 ]; do
         --v6-suffix) need $# "$1"; V6S="$2"; shift 2 ;;
         --v6-port)   need $# "$1"; V6P="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=1; shift ;;
-        -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
+        -h|--help)   sed -n '2,34p' "$0"; exit 0 ;;
         *) echo "未知参数：$1（--help 看用法）" >&2; exit 1 ;;
     esac
 done
@@ -69,15 +70,17 @@ done
 
 # ------------------------------- 校验 -------------------------------
 MISSING=""
-[ -n "${TOKEN}" ]   || MISSING="${MISSING} token"
-[ -n "${ACCOUNT}" ] || MISSING="${MISSING} account"
-[ -n "${DOMAIN}" ]  || MISSING="${MISSING} domain"
-[ -n "${SUFFIX}" ]  || MISSING="${MISSING} suffix"
-[ -n "${PORT}" ]    || MISSING="${MISSING} port"
+[ -n "${TOKEN}" ]   || MISSING="${MISSING} --token"
+[ -n "${ACCOUNT}" ] || MISSING="${MISSING} --account"
+[ -n "${DOMAIN}" ]  || MISSING="${MISSING} --domain"
+[ -n "${SUFFIX}" ]  || MISSING="${MISSING} --suffix"
+[ -n "${PORT}" ]    || MISSING="${MISSING} --port"
 
 if [ -n "${MISSING}" ]; then
     echo "❌ 缺少参数：${MISSING}" >&2
-    echo "   用法：$0 --token ... --account ... --domain ... --suffix ... --port ..." >&2
+    echo "   --domain / --suffix / --port 没有默认值，必须自己传" >&2
+    echo "   （也可以设环境变量 BASE_DOMAIN / V4_SUFFIX / port）" >&2
+    echo "   用法：$0 --token ... --account ... --domain <主域名> --suffix <跳转后缀> --port <端口>" >&2
     exit 1
 fi
 

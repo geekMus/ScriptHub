@@ -11,28 +11,26 @@ Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已
 
 ## 用法
 
-把下面整段填进 DPanel 计划任务的「脚本」框（建议每 2 小时一次、超时 600 秒）。只有四个变量要改：
+只有两个变量：脚本地址（远程或本地都行）和一段参数。把整段填进 DPanel 计划任务的「脚本」框（建议计划任务超时 600 秒）。
 
 ```sh
-# 1) 重试脚本地址
-RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-# 2) 目标：远程地址（只下载一次）或本地脚本路径，二选一
-TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
-# 本地已有一份时改成：TARGET="/opt/scripts/container-autoupdate.sh"
-# 3) 重试脚本自己的参数
-RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
-# 4) 目标脚本的参数：--compose <项目名> 或 --container <容器名>
-TARGET_ARGS="--compose myapp"
+# 地址：远程脚本地址；本地已有文件就写路径
+ADDR="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+# 参数：全部写在一个变量里，写目标（--compose 或 --container）
+ARGS="--compose myapp"
 
-curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
-  || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
+# 远程地址：下载一次再执行
+curl -fsSL "$ADDR" -o /tmp/container-autoupdate.sh \
+  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+sh /tmp/container-autoupdate.sh $ARGS
+
+# 本地路径：直接执行
+sh "$ADDR" $ARGS
 ```
 
-- 目标写远程地址时只下载一次、校验语法后反复执行；写本地路径时 retry 直接执行本地文件，不下载。只有 `75`（和 124/137）才重试，参数错/目录错第一轮就结束。
-- `retry.sh` 用 `RETRY_TIMEOUT` 告诉脚本执行上限，脚本据此把整轮预算压到 135 秒并留 15 秒收尾，不会在拉镜像途中被外部 KILL。
-- 最坏不到 480 秒（下载最多重试两次 + 三次执行各 135 秒），压得住 DPanel 的 600 秒；慢网络下「拉完但没时间 up -d」会用 `75` 收手，下一轮 pull 是空操作。
-- 脚本内部每次调 `docker` / DPanel CLI 也带超时，并且和 `retry.sh` 一样按整组收尾：compose 插件这类孙进程不会变成孤儿把任务吊住。
+- `ARGS` 里必须且只能给一个目标：`--compose <项目名>` 或 `--container <容器名>`。
+- 脚本整轮上限默认 540 秒，计划任务超时设 600 秒即可。
+- 脚本内部每次调 `docker` / DPanel CLI 也带超时，并按整组收尾，不会留下孤儿进程。
 
 ## 参数
 

@@ -15,27 +15,25 @@
 
 ## 用法
 
-把下面整段填进需要重试的位置（DPanel 计划任务的「脚本」框、Lucky 规则脚本等）。只有四个变量要改：
+只有两个变量：脚本地址（远程或本地都行）和一段参数。
 
 ```sh
-# 1) 重试脚本地址
-RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-# 2) 目标：远程地址或本地脚本路径都行；这里留空，按需填
-TARGET=""
-# 3) 重试脚本自己的参数（-n 次数、-i 间隔、-d 下载超时、-x 执行超时）
-RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
-# 4) 目标脚本的参数，按空格写；不需要就留空
-TARGET_ARGS="--compose myapp"
+# 地址：远程脚本地址；本地已有文件就写路径
+ADDR="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
+# 参数：全部写在一个变量里
+ARGS="-n 3 -i 2 -d 20 -x 150"
 
-curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
-  || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
+# 远程地址：下载一次再执行
+curl -fsSL --http1.1 --max-time 30 "$ADDR" -o /tmp/retry.sh \
+  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+sh /tmp/retry.sh $ARGS -- sh /opt/backup.sh
+
+# 本地路径：直接执行
+sh "$ADDR" $ARGS -- sh /opt/backup.sh
 ```
 
-- `TARGET` 以 `http://` / `https://` 开头：只下载一次、校验语法后反复执行；写本地路径（如 `/opt/backup.sh`）就直接用 `sh` 执行，不下载。
-- `RETRY_ARGS`、`TARGET_ARGS` 故意不加引号：按空格拆成多个参数；不用的项留空即可。
-- `TARGET` 是示例占位：填远程地址或本地路径后再跑；留空时 retry 会按参数错误退出。
-- 想直接跑本地命令也可以：`sh retry.sh -n 3 -- sh /opt/backup.sh`。
+- 远程地址只下载一次，之后每次重试都是重新执行，不会重复下载。
+- `$ARGS` 故意不加引号：按空格拆成多个参数；不需要的项留空即可。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |

@@ -4,28 +4,24 @@
 
 ## 用法
 
-Lucky 每次端口变化只会调一次脚本，所以在 STUN 穿透规则的「脚本」栏里直接拉最新版来跑：
+只有两个变量：脚本地址（远程或本地都行）和一段参数。Lucky 的 STUN 规则每次端口变化只调一次，把整段填进规则的「脚本」栏。
 
 ```sh
-# 脚本地址（换镜像只改这一行；要写 raw.githubusercontent.com 的完整地址）
-WORKER_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
+# 地址：远程脚本地址；本地已有文件就写路径
+ADDR="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
+# 参数：全部写在一个变量里
+ARGS="--token $CF_WORKER_API_TOKEN --account $CF_ACCOUNT_ID --domain example.com --suffix rt.example.com --port ${port} --worker stun-redirect"
 
-# 执行参数（按需改）
-CF_TOKEN="$CF_WORKER_API_TOKEN"
-CF_ACCOUNT="$CF_ACCOUNT_ID"
-DOMAIN="example.com"
-SUFFIX="rt.example.com"
-PORT="${port}"            # Lucky 的占位符，不用改
-WORKER="stun-redirect"
-
-R=/tmp/lucky-stun-worker.sh
-curl -fsSL --http1.1 --max-time 3 "$WORKER_URL" -o "$R" \
+# 远程地址：下载一次再执行
+curl -fsSL --http1.1 --max-time 3 "$ADDR" -o /tmp/lucky-stun-worker.sh \
   || { echo "ERR 拉取脚本失败" >&2; exit 1; }
-sh "$R" --token "$CF_TOKEN" --account "$CF_ACCOUNT" \
-  --domain "$DOMAIN" --suffix "$SUFFIX" --port "$PORT" --worker "$WORKER"
+sh /tmp/lucky-stun-worker.sh $ARGS
+
+# 本地路径：直接执行
+sh "$ADDR" $ARGS
 ```
 
-`PORT` 里写的是 Lucky 的占位符 `${port}`，运行前会替换成实际端口；`example.com` / `rt.example.com` 换成自己的域名。Lucky 每轮只有 **15 秒**：拉脚本与部署一般合计 2–6 秒，够用。
+`ARGS` 里的 `${port}` 是 Lucky 的占位符，运行前会替换成实际端口；`example.com` / `rt.example.com` 换成自己的域名。Lucky 每轮只有 **15 秒**：拉脚本与部署一般合计 2–6 秒，够用。
 
 ## 参数
 

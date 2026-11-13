@@ -242,8 +242,8 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   DPANEL_BIN                    DPanel CLI 路径（默认 /app/server/dpanel）
   DPANEL_DOCKER_ENV             DPanel 里的 docker 环境名（默认 local）
   DRY_RUN=1                     同 --dry-run
-  T_HARD                        整轮时间硬上限（秒）；不给时跟随外层 retry.sh 的 -x
-                                （取 RETRY_TIMEOUT-15，最小 60），都没有才用 540
+  T_HARD                        整轮时间硬上限（秒）；不给时若环境里有 RETRY_TIMEOUT
+                                就取 RETRY_TIMEOUT-15（最小 60），都没有才用 540
   T_INSPECT / DP_T_CHECK        单次「检查」调用超时（秒，默认 120）
   DP_T_UPGRADE                  单次容器升级调用超时（秒，默认 420）
   DP_T_PULL / DP_T_UP           Compose 模式的 pull / up -d 超时（秒，默认 420 / 180）
@@ -253,9 +253,9 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   0   成功，或无需更新
   1   配置/环境错误，或重试也没用（重跑结果不变）
   75  临时失败：网络/镜像仓库暂时不可达、拉取或部署被超时打断、本轮预算不够
-      没做完（目标保持原样，下一轮接着做）——外层 retry.sh 会再跑一轮
+      没做完（目标保持原样，下一轮接着做）
   被 TERM/INT/HUP 打断时脚本会先记一行「收到 SIGxxx，提前结束」再按 75 退出，
-  所以日志里既能看出停在哪一步，也能被外层当成可重试
+  所以日志里既能看出停在哪一步
 
 示例：
   # DPanel 计划任务里跑（推荐）：把下面这条命令填进计划任务的「命令」，
@@ -268,18 +268,17 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   # Compose 项目的目录通常是自动认出来的；要显式指定也可以：
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
-  # 推荐：整段填进 DPanel 计划任务的「脚本」框。只有四个变量要改。
-  #   重试交给 retry.sh，超时按阶段给：拉 retry.sh 30 秒、下载目标脚本 20 秒、
-  #   执行 150 秒；脚本里不写 --max-time。--http1.1 是为了扛偶发的 TLS 抖动。
-  RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-  TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
-  # 本地已有一份时改成：TARGET="/opt/scripts/container-autoupdate.sh"
-  RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
-  TARGET_ARGS="--compose myapp"
+  # 填进 DPanel 计划任务的「脚本」框：只有两个变量要改。
+  ADDR="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+  ARGS="--compose myapp"
 
-  curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
-    || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-  sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
+  # 远程地址：下载一次再执行
+  curl -fsSL "$ADDR" -o /tmp/container-autoupdate.sh \
+    || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+  sh /tmp/container-autoupdate.sh $ARGS
+
+  # 本地路径：直接执行
+  sh "$ADDR" $ARGS
 
 USAGE
 }

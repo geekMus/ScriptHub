@@ -94,7 +94,19 @@ DPANEL_BIN="${DPANEL_BIN:-/app/server/dpanel}"  # DPanel CLI 在容器里的路�
 DPANEL_DOCKER_ENV="${DPANEL_DOCKER_ENV:-local}" # DPanel 里的 docker 环境名（对应它的「Docker 服务器」）
 
 START=$(date +%s)
-T_HARD="${T_HARD:-540}"            # 整轮时间硬上限（秒）
+# 整轮时间硬上限（秒）。优先级：显式 T_HARD > 外层 retry.sh 给的 RETRY_TIMEOUT > 540。
+# 外层 retry.sh -x 到点会硬杀（SIGKILL）：脚本要是还以为自己有 540 秒，就会在 pull
+# 中途被杀，日志里只剩一句 Killed，docker compose 还会变成孤儿继续跑。所以拿到
+# RETRY_TIMEOUT 就提前 15 秒收手，留出时间自己把「剩余时间不足」写进日志、退 75；
+# 下一轮重跑时镜像层已经在本地，时间自然够用。
+if [ -n "${T_HARD:-}" ]; then
+  :                                        # 调用方显式指定，原样用
+elif [ -n "${RETRY_TIMEOUT:-}" ] && [ "${RETRY_TIMEOUT}" -gt 0 ]; then
+  T_HARD=$(( RETRY_TIMEOUT - 15 ))
+  [ "$T_HARD" -lt 60 ] && T_HARD=60
+else
+  T_HARD=540
+fi
 # 单次「检查」调用超时。T_INSPECT 是旧名字，继续认，方便老任务不改配置。
 DP_T_CHECK="${DP_T_CHECK:-${T_INSPECT:-120}}"
 DP_T_UPGRADE="${DP_T_UPGRADE:-420}"  # 单次「升级」调用超时（容器模式；实际还会被剩余预算收敛）
@@ -169,6 +181,21 @@ log() {
   esac
 }
 
+# 被外层中断（retry.sh -x 到点发的 TERM、计划任务/系统发的 TERM）时，先留一句能
+# 对上的话再退出，别让日志里只剩一句 Killed —— 那样看不出停在哪一步、跑了多久。
+# 退出码用 75（可重试）：本来就没跑完，下一轮换个完整预算接着做；pull 下来的
+# 镜像层已经在本地，下一轮不会再下载。
+on_signal() {
+  trap - TERM INT HUP
+  EXIT_CODE="$RETRY_EXIT"
+  log "WARN 收到 SIG$1，提前结束（已跑 $(elapsed)s / 上限 ${T_HARD}s）"
+  log "     本轮没做完的动作下一轮会接着做；已拉下来的镜像层不重复下载"
+  exit "$RETRY_EXIT"
+}
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
+trap 'on_signal HUP' HUP
+
 usage() {
   cat <<'USAGE'
 DPanel 定时任务自动更新脚本
@@ -213,17 +240,20 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   DPANEL_BIN                    DPanel CLI 路径（默认 /app/server/dpanel）
   DPANEL_DOCKER_ENV             DPanel 里的 docker 环境名（默认 local）
   DRY_RUN=1                     同 --dry-run
-  T_HARD                        整轮时间硬上限（秒，默认 540）
+  T_HARD                        整轮时间硬上限（秒）；不给时跟随外层 retry.sh 的 -x
+                                （取 RETRY_TIMEOUT-15，最小 60），都没有才用 540
   T_INSPECT / DP_T_CHECK        单次「检查」调用超时（秒，默认 120）
   DP_T_UPGRADE                  单次容器升级调用超时（秒，默认 420）
   DP_T_PULL / DP_T_UP           Compose 模式的 pull / up -d 超时（秒，默认 420 / 180）
   DP_MIN_UPGRADE                剩余预算低于这个值就不动手（秒，默认 90）
 
 退出码：
-  0  成功，或无需更新
-  1  配置/环境错误，或本轮未能完成更新（目标保持原样）
-  130  被 Ctrl-C（SIGINT）中断
-  143  被 SIGTERM / SIGHUP 中断（计划任务执行超时常见）
+  0   成功，或无需更新
+  1   配置/环境错误，或重试也没用（重跑结果不变）
+  75  临时失败：网络/镜像仓库暂时不可达、拉取或部署被超时打断、本轮预算不够
+      没做完（目标保持原样，下一轮接着做）——外层 retry.sh 会再跑一轮
+  被 TERM/INT/HUP 打断时脚本会先记一行「收到 SIGxxx，提前结束」再按 75 退出，
+  所以日志里既能看出停在哪一步，也能被外层当成可重试
 
 示例：
   # DPanel 计划任务里跑（推荐）：把下面这条命令填进计划任务的「命令」，
@@ -456,7 +486,8 @@ container_update() {
   _rest=$(left)
   if [ "$_rest" -lt "$DP_MIN_UPGRADE" ]; then
     # 先判失败再打 WARN：log() 靠 EXIT_CODE 决定这句要不要进真 stderr（见文件头部说明）
-    EXIT_CODE=1
+    # 用 75（可重试）而不是 1：这一轮什么都没动，下一轮换个完整预算就能做完
+    EXIT_CODE="$RETRY_EXIT"
     log "WARN 剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不启动升级，容器保持原样"
     log "     下一轮计划任务会重新检查；也可以把 T_HARD 或计划任务的超时调大"
     return 1
@@ -707,8 +738,10 @@ compose_update() {
   _rest=$(left)
   if [ "$_rest" -lt "$DP_MIN_UPGRADE" ]; then
     # 先判失败再打 WARN：log() 靠 EXIT_CODE 决定这句要不要进真 stderr（见文件头部说明）
-    EXIT_CODE=1
+    # 用 75（可重试）而不是 1：这一轮什么都没动，下一轮换个完整预算就能做完
+    EXIT_CODE="$RETRY_EXIT"
     log "WARN 剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不部署，项目保持原样"
+    log "     下一轮计划任务会重新检查；也可以把 T_HARD 或计划任务的超时调大"
     return 1
   fi
 
@@ -734,6 +767,18 @@ compose_update() {
     return 1
   fi
 
+  # 拉取可能把这一轮预算花掉一大半：剩下的时间不够 up -d 的话，现在动手大概率被
+  # 自己的 timeout 杀掉（拿到 137 → 判成 1），而「时间不够」明明是重试就能解决的。
+  # 所以先看一眼预算，不够就用 75 收手：镜像层已经在本地，下一轮 pull 是空操作，
+  # 时间全留给 up -d。
+  _rest=$(left)
+  if [ "$_rest" -lt "$DP_MIN_UPGRADE" ]; then
+    EXIT_CODE="$RETRY_EXIT"
+    log "WARN 拉取已完成但剩余时间不足（${_rest}s < ${DP_MIN_UPGRADE}s），本轮不部署，项目保持原样"
+    log "     镜像已留在本地；下一轮会直接拿它们重建，时间够用"
+    return 1
+  fi
+
   # 2) 就地重新部署。不加 --remove-orphans：它会删掉不在当前 compose 文件里的容器。
   _t=$(budget_timeout "$DP_T_UP")
   log "就地重新部署（docker compose up -d，等待上限 ${_t}s）"
@@ -742,8 +787,15 @@ compose_update() {
   if [ "$_rc" -ne 0 ]; then
     log "ERR 重新部署失败（docker compose up -d 退出码 $_rc）"
     printf '%s\n' "$_out" | tail -n5 | while IFS= read -r _nl; do log "    $_nl"; done
-    log "    compose 文件与容器定义都没被脚本改过，可以直接再跑一轮"
-    EXIT_CODE=1
+    case "$_rc" in
+      124|137)
+        # 被自己的 timeout 打断：不是 compose 的错，下一轮（预算完整）再 up -d 一次即可。
+        log "    重新部署被超时打断：属于临时失败（退出码 75），下一轮可以再试"
+        EXIT_CODE="$RETRY_EXIT" ;;
+      *)
+        log "    compose 文件与容器定义都没被脚本改过，可以直接再跑一轮"
+        EXIT_CODE=1 ;;
+    esac
     return 1
   fi
 
@@ -819,7 +871,7 @@ fi
 
 # 每次真实运行都在日志里留一行版本号：排查历史问题时，能立刻看出那一轮
 # 跑的是哪一版脚本（升级过 latest 之后尤其重要）。
-log "container-autoupdate 启动"
+log "container-autoupdate 启动（本轮预算 ${T_HARD}s）"
 
 # 目标判定（依赖检查与后面的分支都要用）
 _GOAL=""

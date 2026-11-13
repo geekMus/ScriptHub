@@ -1,47 +1,20 @@
 # container-autoupdate
 
-给 **DPanel 计划任务**用的容器 / Compose 自动更新脚本。单文件，跑一次检查一轮就结束，频率交给 DPanel。
+给 **DPanel 计划任务**用的容器 / Compose 自动更新脚本。单文件、没有版本号、不做缓存：每次触发都取仓库里最新的一份来跑。
 
-脚本没有版本号、不做缓存：每次触发都从本仓库拉最新的一份来跑，拉不到就报错退出，不拿旧副本凑合。
+| 目标 | 怎么更新 | 回滚点 |
+| --- | --- | --- |
+| 容器（`--container`） | DPanel `container:upgrade`，确认有新版本才升级 | DPanel 自动留 `<名字>-bak-<时间戳>` |
+| Compose（`--compose`） | `docker compose pull` + `up -d` 就地重建 | 不留；回退要把 compose 里的 tag 钉回旧版本 |
 
-## 用法
+Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已无标签、无容器引用）；容器分支不动镜像。同一目标只挂一个计划任务（脚本内部不加锁）。
+
+## 用法（推荐：远程脚本）
+
+把下面整段填进 DPanel 计划任务的「脚本」框（建议每 2 小时一次、超时 600 秒）：
 
 ```sh
-sh container-autoupdate.sh --container myapp          # 更新一个容器
-sh container-autoupdate.sh --compose myapp            # 更新一个 Compose 项目
-sh container-autoupdate.sh --compose myapp --dry-run  # 只看不动手
-sh container-autoupdate.sh --help                     # 全部选项
-```
-
-目标也可以写在脚本顶部或环境变量（`UPD_COMPOSE` / `UPD_CONTAINER`），优先级：命令行 > 环境变量 > 配置区。
-
-| 目标 | 谁动手 | 回滚点 |
-| --- | --- | --- |
-| 容器 | DPanel `container:upgrade`（有新版本才升级） | DPanel 自动留 `<名字>-bak-<时间戳>` |
-| Compose | `docker compose pull` + `up -d` | 不留；回退要把 compose 里的 tag 钉回旧版本 |
-
-Compose 分支更新成功后会回收“本项目、已无标签、无引用”的旧镜像；容器分支不碰 Docker。
-
-## 退出码
-
-脚本自己**不做重试**，只把这一轮的结果用退出码说清楚；要不要再跑由外层 `retry.sh` 决定：
-
-| 码 | 含义 | 典型场景 |
-| --- | --- | --- |
-| `0` | 成功，或本来就没有新版本 | 正常结束 |
-| `75` | 临时失败，值得再跑一轮 | 拉取镜像失败（网络/镜像仓库不可达）、连不上 Docker（正在重启）、DPanel 调用超时、拉取或部署被超时打断、本轮预算不够没做完 |
-| `1` | 不可重试的失败 | 参数缺失/冲突、Compose 项目目录不存在、compose 文件错、DPanel CLI 不可用、容器升级失败 |
-
-判定原则只有一句：**换成 5 秒后再跑一次有可能成功的，才算 75。**
-
-## 推荐用法：装进 DPanel 计划任务
-
-新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）。重试交给 `retry.sh`，超时按阶段给：拉 `retry.sh` 本身 30 秒、下载目标脚本 20 秒、执行 150 秒。
-
-`retry.sh` 会把执行上限（`-x`）告诉脚本（环境变量 `RETRY_TIMEOUT`），脚本据此把整轮预算压到 135 秒、并留 15 秒自己收尾 —— 它永远在被外部 KILL 之前先写清楚「停在哪、为什么」，而不是留下一句 `Killed`。
-
-```sh
-# 两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）
+# 两个地址（换镜像就改这两行；要写 raw.githubusercontent.com 的完整地址）
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 
@@ -51,18 +24,52 @@ curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
 sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
 ```
 
-这条命令的行为：
+- 目标脚本只下载一次、校验语法后反复执行，重试不会再下载。
+- 只有 `75`（和超时码 124/137）会触发下一轮；参数错、目录错第一轮就结束，不会白等 3 轮。
+- `retry.sh` 会把执行上限（`RETRY_TIMEOUT`）告诉脚本，脚本据此把本轮预算压到 135 秒、留 15 秒自己收尾，不会在拉镜像途中被外部 KILL。
+- 最坏情况（下载 3 次 + 执行 3 次）约 540 秒，DPanel 的 600 秒压得住。
+- 慢网络下「拉完镜像但没时间 up -d」会用 `75` 收手：下一轮 pull 是空操作，时间全给 `up -d`。
 
-- **目标脚本只下载一次**，校验语法后反复执行；重试不会重新下载。
-- 只有退出码 `75`（以及超时 124/137）才会触发下一次执行；参数错、目录错这类第一轮就结束，不会白等 3 轮。
-- 最坏情况（下载 3 次 + 执行 3 次）约 540 秒，压得住 DPanel 的 600 秒。
-- 慢网络下每轮只做一半是正常的：拉取成功但剩余预算不够 `up -d` 时会用 `75` 收手，下一轮 pull 已是空操作，时间全给 `up -d`。
-
-## 手动跑
-
-不套 retry 也行，就是「跑一轮就结束」：
+### 或者先下载、本地运行
 
 ```sh
-sh container-autoupdate.sh --compose myapp
-echo $?   # 0 成功；75 临时失败（可手动再跑）；1 配置/目标问题
+# 地址（换镜像只改这一行）
+TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+curl -fsSL --http1.1 --max-time 30 "$TARGET_URL" -o /tmp/container-autoupdate.sh
+
+sh /tmp/container-autoupdate.sh --compose myapp              # 更新 Compose 项目
+sh /tmp/container-autoupdate.sh --container myapp            # 更新单个容器
+sh /tmp/container-autoupdate.sh --compose myapp --dry-run    # 只看不动手
 ```
+
+本地方式没有重试和预算保护，适合手动执行。
+
+## 参数
+
+| 选项 | 环境变量 | 说明 |
+| --- | --- | --- |
+| `--compose <名>` | `UPD_COMPOSE` | Compose 项目名；项目目录/文件从容器标签自动反查 |
+| `--container <名>` | `UPD_CONTAINER` | 容器名 |
+| `--compose-dir <路径>` | `COMPOSE_DIR` | 指定 Compose 项目目录；一般不用填 |
+| `--docker-sock <路径>` | `DOCKER_SOCK` / `DOCKER_HOST` | docker CLI 端点 |
+| `--dpanel-container <名>` | `DPANEL_NAME` | DPanel 容器名（默认 `dpanel`） |
+| `--dpanel-bin <路径>` | `DPANEL_BIN` | 容器内 DPanel CLI 路径（默认 `/app/server/dpanel`） |
+| `--dpanel-docker-env <名>` | `DPANEL_DOCKER_ENV` | DPanel 里的 docker 环境名（默认 `local`） |
+| `--dry-run` | `DRY_RUN=1` | 只检查、不动手 |
+| `-h, --help` | — | 全部选项与超时变量 |
+
+`--compose` 与 `--container` 必须且只能给一个；优先级：命令行 > 环境变量 > 文件顶部配置区。
+
+时间变量（整轮上限 `T_HARD`、各阶段超时 `DP_T_CHECK` / `DP_T_PULL` / `DP_T_UP`、起步门槛 `DP_MIN_UPGRADE` 等）见 `--help`。
+
+## 退出码
+
+| 码 | 含义 |
+| --- | --- |
+| `0` | 成功，或本来就没有新版本 |
+| `75` | 临时失败（可重试）：网络/镜像仓库暂时不可达、连不上 Docker（正在重启）、拉取或部署被超时打断、本轮预算不够没做完 |
+| `1` | 不可重试：参数缺失/冲突、Compose 目录不存在、compose 文件错、DPanel CLI 不可用、容器升级失败 |
+
+判定原则：**换成 5 秒后再跑一次有可能成功的，才算 `75`。**
+
+被 TERM/INT/HUP 打断时，脚本会先打印「收到 SIGxxx，提前结束」再按 `75` 退出。

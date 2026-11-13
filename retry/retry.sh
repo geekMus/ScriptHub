@@ -15,6 +15,9 @@
 #   -u  远程脚本地址：每轮先下载到临时文件、校验非空且语法正确，再用 sh 执行，
 #       后面的参数原样传给该脚本（下载失败也算这一轮失败）
 #
+#   下载和执**都不设超时**：多久算超时由外层决定（Lucky 对每轮脚本 15 秒，
+#   DPanel 计划任务的 600 秒，或者你自己套 timeout）。
+#
 # 例子：
 #   sh retry.sh -n 3 -- sh ./lucky-stun-worker.sh --token "$TOKEN" --port 5267
 #   sh retry.sh -n 3 -u https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh \
@@ -67,7 +70,7 @@ while :; do
         say "▶ 第 ${T}/${N} 次: 下载 ${URL}"
         TMP=$(mktemp 2>/dev/null || echo "/tmp/retry.$$")
         RC=1
-        if curl -fsSL --connect-timeout 5 --max-time 30 "${URL}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
+        if curl -fsSL --http1.1 "${URL}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
             if sh -n "${TMP}" 2>/dev/null; then
                 RC=0
             else

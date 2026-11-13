@@ -232,15 +232,13 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
 
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
   #   只从一个地方拉：github.mus.pp.ua（自家 GitHub 加速）。地址要写完整，
-  #   把 https://raw.githubusercontent.com/... 整个拼在域名后面；拉不到就报错
-  #   退出，本轮不更新。--http1.1 + --retry 是为了扛住该加速站偶发的 TLS 抖动。
-  G=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh
-  T=/tmp/ct-new.sh
-  curl -fsSL --http1.1 --retry 3 --retry-delay 2 --retry-all-errors --max-time 30 "$G" -o "$T" \
-    || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
-  { [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
-    || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
-  sh "$T" --compose myapp
+  #   把 https://raw.githubusercontent.com/... 整个拼在域名后面。
+  #   重试交给 retry.sh（最多 3 次），超时交给 DPanel 自己的计划任务超时
+  #   （600 秒），脚本里不写 --max-time。--http1.1 是为了扛住该加速站偶发的 TLS 抖动。
+  M=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main
+  R=/tmp/retry.sh
+  curl -fsSL --http1.1 "$M/retry/retry.sh" -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+  sh "$R" -n 3 -i 2 -u "$M/container-autoupdate/container-autoupdate.sh" -- --compose myapp
 
 USAGE
 }

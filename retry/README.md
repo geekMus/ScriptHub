@@ -23,6 +23,8 @@ sh retry.sh -n 2 -i 1 -u https://raw.githubusercontent.com/geekMus/ScriptHub/mai
 
 只看退出码：0 算成功，非 0 就重试。最终退出码 = 最后一次的结果；参数写错返回 2。
 
+**不管超时。** 下载和执行都不设超时，多久算超时交给外层：Lucky 对每轮脚本 15 秒，DPanel 计划任务用它自己的超时（我们设的是 600 秒），你也可以自己套 `timeout`。
+
 ## 在 Lucky 里
 
 把 `retry.sh` 和基础脚本一起放进容器，脚本框粘：
@@ -33,6 +35,17 @@ sh /app/conf/retry.sh -n 2 -i 1 -- sh /app/conf/lucky-stun-worker.sh \
 ```
 
 Lucky 对每轮脚本只有 **15 秒**，单次请求最坏约 5 秒，所以 `-n 2 -i 1` 是上限。
+
+## 在 DPanel 计划任务里
+
+超时交给 DPanel（我们设 600 秒），脚本里只写重试：
+
+```sh
+M=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main
+R=/tmp/retry.sh
+curl -fsSL --http1.1 "$M/retry/retry.sh" -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+sh "$R" -n 3 -i 2 -u "$M/container-autoupdate/container-autoupdate.sh" -- --compose myapp
+```
 
 ## 退出码
 

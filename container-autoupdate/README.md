@@ -24,22 +24,17 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 
 ## 装进 DPanel 计划任务
 
-新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）：
+新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）。重试交给 `retry.sh`，超时交给 DPanel，脚本里不写超时：
 
 ```sh
-G=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh
-T=/tmp/ct-new.sh
-curl -fsSL --http1.1 --retry 3 --retry-delay 2 --retry-all-errors --max-time 30 "$G" -o "$T" \
-  || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
-{ [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
-  || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
-sh "$T" --compose myapp
+M=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main
+R=/tmp/retry.sh
+curl -fsSL --http1.1 "$M/retry/retry.sh" -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+sh "$R" -n 3 -i 2 -u "$M/container-autoupdate/container-autoupdate.sh" -- --compose myapp
 ```
 
-只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://raw.githubusercontent.com/...` 整个拼在它后面，用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像；拉不到就退出、这一轮不更新，也不会留下半截文件。
+只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://raw.githubusercontent.com/...` 整个拼在它后面，用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像。每轮由 `retry.sh` 重新下载、`sh -n` 校验后再执行；下载失败或脚本非 0 退出都算这一轮失败，最多 3 次。
 
 ## 退出码
 
 `0` 更新成功或本来就没有新版本；非 `0` 失败，原因同时写 stderr（计划任务失败时只收 stderr）。
-
-要重试就套一层：`sh retry.sh -n 3 -- sh container-autoupdate.sh --compose myapp`。

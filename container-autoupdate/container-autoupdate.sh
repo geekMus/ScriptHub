@@ -336,39 +336,55 @@ parse_args() {
 HAVE_SETSID=0
 command -v setsid >/dev/null 2>&1 && HAVE_SETSID=1
 
+# 外层按整组发 TERM 时，$() 里的子 shell 要立刻把自己这一组收掉：主 shell 的
+# on_signal 得等这次命令返回才会执行，这期间 setsid 出来的子进程会逃过外层的整组
+# 清理（N1 实测：retry.sh -x 4 打过来，脚本退出后 fake pull 的孙进程还在）。
+# 这个 trap 在真正执行命令的子 shell 里跑，所以不用等主 shell。
+_bounded_abort() {
+  if [ -n "${_bpid:-}" ]; then
+    kill -TERM "-${_bpid}" 2>/dev/null
+    kill -KILL "-${_bpid}" 2>/dev/null
+  fi
+  exit 124
+}
+
 # $1 = 超时秒数，其余 = 要执行的命令。退出码：超时统一 124，其它原样返回。
+# 整个函数跑在子 shell 里：这样 TERM/INT 一到，trap 能在当前进程里立刻执行。
 run_bounded() {
   _bt="$1"; shift
-  if [ "${HAVE_SETSID}" = "1" ]; then
-    setsid "$@" &
-    _bpid=$!
-    # watchdog 的输出全部丢掉：它不能占着调用方的 stdout，否则 $(...) 会等它退出
-    (
-      _n=0
-      while [ "$_n" -lt "$_bt" ]; do
-        sleep 1
-        kill -0 "$_bpid" 2>/dev/null || exit 0
-        _n=$(( _n + 1 ))
-      done
-      kill -TERM "-$_bpid" 2>/dev/null
-      _g=0
-      while [ "$_g" -lt 2 ]; do
-        kill -0 "$_bpid" 2>/dev/null || exit 0
-        sleep 1
-        _g=$(( _g + 1 ))
-      done
-      kill -KILL "-$_bpid" 2>/dev/null
-    ) >/dev/null 2>&1 &
-    wait "$_bpid"
+  (
+    trap '_bounded_abort' TERM INT
+    if [ "${HAVE_SETSID}" = "1" ]; then
+      setsid "$@" &
+      _bpid=$!
+      # watchdog 的输出全部丢掉：它不能占着调用方的 stdout，否则 $(...) 会等它退出
+      (
+        _n=0
+        while [ "$_n" -lt "$_bt" ]; do
+          sleep 1
+          kill -0 "$_bpid" 2>/dev/null || exit 0
+          _n=$(( _n + 1 ))
+        done
+        kill -TERM "-$_bpid" 2>/dev/null
+        _g=0
+        while [ "$_g" -lt 2 ]; do
+          kill -0 "$_bpid" 2>/dev/null || exit 0
+          sleep 1
+          _g=$(( _g + 1 ))
+        done
+        kill -KILL "-$_bpid" 2>/dev/null
+      ) >/dev/null 2>&1 &
+      wait "$_bpid"
+      _brc=$?
+      _bpid=""
+      case "$_brc" in 137|143) _brc=124 ;; esac
+      exit "$_brc"
+    fi
+    timeout -s KILL "$_bt" "$@"
     _brc=$?
-    _bpid=""
     case "$_brc" in 137|143) _brc=124 ;; esac
-    return "$_brc"
-  fi
-  timeout -s KILL "$_bt" "$@"
-  _brc=$?
-  case "$_brc" in 137|143) _brc=124 ;; esac
-  return "$_brc"
+    exit "$_brc"
+  )
 }
 
 # ---------- 与 DPanel 打交道 ----------

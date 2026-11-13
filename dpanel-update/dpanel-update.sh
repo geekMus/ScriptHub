@@ -91,9 +91,11 @@ command -v docker >/dev/null 2>&1 || die "Docker 未安装"
 docker info >/dev/null 2>&1 || die "Docker 不可用（守护进程未运行或当前用户无权限）"
 
 # 防止在 DPanel 自己的容器里执行：stop 会把当前进程一起杀掉。
+# 部分 OpenWrt 没有 hostname 命令，优先用 uname -n / /proc。
 if [ -f /.dockerenv ]; then
-    _host=$(hostname 2>/dev/null || true)
-    if [ "$_host" = "$CONTAINER" ]; then
+    _host=$(uname -n 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null || true)
+    _target_host=$(docker inspect --format '{{.Config.Hostname}}' "$CONTAINER" 2>/dev/null || true)
+    if [ -n "$_host" ] && { [ "$_host" = "$CONTAINER" ] || [ "$_host" = "$_target_host" ]; }; then
         die "检测到在 $CONTAINER 容器内部运行；请改从宿主机 cron/计划任务执行"
     fi
 fi

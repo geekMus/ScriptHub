@@ -10,14 +10,14 @@
 
 只有两个变量：脚本地址和一段参数。远程脚本用下面的 wrapper；本地已有脚本时直接执行。
 
-把下面的内容保存成 wrapper 脚本（例如 `/root/update-dpanel.txt`，名字随意，能用 `sh` 执行即可）：
+把下面的内容保存成 wrapper 脚本（例如 `/root/update-dpanel.sh`，名字随意，能用 `sh` 执行即可）：
 
 ```sh
 #!/bin/sh
 # ============================================================
-# update-dpanel.txt — 拉取 ScriptHub 的 dpanel-update.sh 并执行
+# update-dpanel.sh — 拉取 ScriptHub 的 dpanel-update.sh 并执行
 #
-# 用法: sh /root/update-dpanel.txt [额外参数]
+# 用法: sh /root/update-dpanel.sh [额外参数]
 # 额外参数追加在 ARGS 后面，同名选项可覆盖 ARGS。
 # ============================================================
 
@@ -35,8 +35,8 @@ exec sh /tmp/dpanel-update.sh $ARGS "$@"
 调用：
 
 ```sh
-sh /root/update-dpanel.txt
-sh /root/update-dpanel.txt --force
+sh /root/update-dpanel.sh
+sh /root/update-dpanel.sh --force
 ```
 
 `ARGS` 是固定参数，末尾的 `"$@"` 把调用 wrapper 时收到的额外参数原样透传给核心脚本。同名选项以后出现的为准，所以 `--force` 可以覆盖 `ARGS` 里的默认值；直接放进 DPanel / OpenWrt 计划任务、不传额外参数时，`"$@"` 为空，行为不变。

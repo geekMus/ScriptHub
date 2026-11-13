@@ -24,11 +24,9 @@ curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
 sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
 ```
 
-- 目标脚本只下载一次、校验语法后反复执行，重试不会再下载。
-- 只有 `75`（和超时码 124/137）会触发下一轮；参数错、目录错第一轮就结束，不会白等 3 轮。
-- `retry.sh` 会把执行上限（`RETRY_TIMEOUT`）告诉脚本，脚本据此把本轮预算压到 135 秒、留 15 秒自己收尾，不会在拉镜像途中被外部 KILL。
-- 最坏情况（下载 3 次 + 执行 3 次）约 540 秒，DPanel 的 600 秒压得住。
-- 慢网络下「拉完镜像但没时间 up -d」会用 `75` 收手：下一轮 pull 是空操作，时间全给 `up -d`。
+- 目标脚本只下载一次、校验语法后反复执行；只有 `75`（和 124/137）才重试，参数错/目录错第一轮就结束。
+- `retry.sh` 用 `RETRY_TIMEOUT` 告诉脚本执行上限，脚本据此把整轮预算压到 135 秒并留 15 秒收尾，不会在拉镜像途中被外部 KILL。
+- 最坏约 540 秒，压得住 DPanel 的 600 秒；慢网络下「拉完但没时间 up -d」会用 `75` 收手，下一轮 pull 是空操作。
 
 ### 或者先下载、本地运行
 
@@ -37,9 +35,8 @@ sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 curl -fsSL --http1.1 --max-time 30 "$TARGET_URL" -o /tmp/container-autoupdate.sh
 
-sh /tmp/container-autoupdate.sh --compose myapp              # 更新 Compose 项目
-sh /tmp/container-autoupdate.sh --container myapp            # 更新单个容器
-sh /tmp/container-autoupdate.sh --compose myapp --dry-run    # 只看不动手
+sh /tmp/container-autoupdate.sh --compose myapp      # 更新 Compose 项目
+sh /tmp/container-autoupdate.sh --container myapp    # 更新单个容器
 ```
 
 本地方式没有重试和预算保护，适合手动执行。

@@ -5,6 +5,7 @@
 | 目录 | 干什么 | 一句话 |
 | --- | --- | --- |
 | [container-autoupdate](./container-autoupdate/) | 容器 / Compose 自动更新（给 DPanel 计划任务） | `sh container-autoupdate.sh --compose myapp` |
+| [dpanel-update](./dpanel-update/) | 重建 docker run 启动的 DPanel，保留网络/静态 IP，失败回滚 | `sh dpanel-update.sh --network DockerBridge --ip 172.20.0.15` |
 | [lucky-stun-worker](./lucky-stun-worker/) | Lucky 打洞后，把新端口部署进 Cloudflare Worker | `sh lucky-stun-worker.sh --token <TOKEN> --account <ID> --domain example.com --suffix rt.example.com --port 5267` |
 | [retry](./retry/) | 只重试临时失败（退出码 75），其它立即结束 | `sh retry.sh -n 3 -- <命令>` |
 

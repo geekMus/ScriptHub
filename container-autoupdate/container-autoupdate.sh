@@ -3,7 +3,6 @@
 # DPanel 定时任务自动更新脚本 —— 一轮更新逻辑，交给 DPanel 的「计划任务」
 # 按固定周期触发。脚本本身不含更新频率逻辑：频率、启停、并发全归 DPanel 管。
 # 手动运行也允许，但那是「跑一轮就结束」的单次更新，不建议再套 cron / systemd timer。
-# 当前版本见 VERSION 字段，用 --version 查看。
 #
 # 目标二选一：一个 Compose 项目名，或一个容器名。可以用命令行参数、
 # 环境变量或文件顶部配置区指定，三者等价，优先级：命令行 > 环境变量 > 配置区。
@@ -28,15 +27,15 @@
 #     清理逻辑误删」这类问题。
 #   · 脚本从 1700 多行降到几百行，剩下的每一条都能一眼看懂、一眼验证。
 #
-# 旧镜像回收（v4.1.0 加回，v5.0.0 起不再保留回滚点；只作用于 Compose 分支）：
+# 旧镜像回收（不保留回滚点；只作用于 Compose 分支）：
 #   `docker compose pull` 会把 <仓库>:<标签>「搬家」到刚拉下来的新镜像上，旧镜像
 #   因此丢掉最后一个标签，但层还完整留在磁盘上；紧接着 `up -d` 重建容器，旧镜像
-#   连最后的引用也没了。v2.0.0 删掉 clean_orphans 之后没人回收，**每成功更新一次
+#   连最后的引用也没了。没有回收逻辑，**每成功更新一次
 #   就永久沉淀一个完整镜像**（N1 实测：magpie 每小时更新，两条 <none> 各占 64MB
 #   独有层）。现在在 compose_update 末尾做一次「只删本项目、已无标签、无引用」的
 #   回收，三条约束见 compose_reclaim 的注释。
-#   **不保留回滚点**（v5.0.0 明确取舍）：v4.1.0 曾把「更新前在用的那个」留着当回滚点，
-#   但那样稳态下每个 Compose 项目永远躺着一个 <none>，与「别堆积」自相矛盾。
+#   **不保留回滚点**：把「更新前在用的那个」留着当回滚点的话，
+#   稳态下每个 Compose 项目永远躺着一个 <none>，与「别堆积」自相矛盾。
 #   代价是 Compose 模式不能再用 `docker tag <旧镜像ID>` 回退 —— 要回退只能把
 #   compose 文件里的 tag 钉回旧版本，再跑一轮。
 #   容器分支**不做**回收：那边 DPanel 的 <容器名>-bak-<时间戳> 备份容器就是回滚点，
@@ -95,7 +94,6 @@ DPANEL_BIN="${DPANEL_BIN:-/app/server/dpanel}"  # DPanel CLI 在容器里的路�
 DPANEL_DOCKER_ENV="${DPANEL_DOCKER_ENV:-local}" # DPanel 里的 docker 环境名（对应它的「Docker 服务器」）
 
 START=$(date +%s)
-VERSION="5.0.1"
 T_HARD="${T_HARD:-540}"            # 整轮时间硬上限（秒）
 # 单次「检查」调用超时。T_INSPECT 是旧名字，继续认，方便老任务不改配置。
 DP_T_CHECK="${DP_T_CHECK:-${T_INSPECT:-120}}"
@@ -200,7 +198,6 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   --dpanel-docker-env <名>  DPanel 里的 docker 环境名（默认 local）
   --dry-run              只检查不动手：容器模式问 DPanel，Compose 模式只列出涉及的镜像
   -h, --help             显示本帮助
-  -V, --version          显示版本
 
 环境变量：
   UPD_COMPOSE / UPD_CONTAINER   目标（同命令行）
@@ -235,9 +232,9 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
 
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
   #   SRC 里一行一个源，只写站点域名；镜像站那条会拼成「站点/原始 GitHub 地址」，
-  #   https://github.com 那条是直连。按顺序试，第一个内容合格的才算成功。
-  #   全部失败时沿用上一轮的副本，照样能跑，但会打一行 WARN 说明（不许静默）。
-  G=https://github.com/geekMus/container-autoupdate/releases/latest/download/container-autoupdate.sh
+  #   https://github.com 那条是直连。按顺序试，第一个内容合格的才算成功；
+  #   全部失败就报错退出，本轮不更新（不留旧副本，每轮都拉最新的一份跑）。
+  G=https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
   SRC='https://gh-proxy.com
   https://ghfast.top
   https://github.com'
@@ -248,16 +245,8 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
     curl -fsSL --max-time 30 "$url" -o "$T" 2>/dev/null || continue
     okfile "$T" && break
   done
-  if okfile "$T"; then
-    mv -f "$T" /tmp/container-autoupdate.sh
-  else
-    echo "WARN 三个源都没拿到可用的脚本，沿用上一轮的副本"
-  fi
-  [ -s /tmp/container-autoupdate.sh ] || { echo "ERR 拿不到可用的更新脚本，也没有上一轮的副本" >&2; exit 1; }
-  sh /tmp/container-autoupdate.sh --compose myapp
-
-  # 想锁死版本：把 G 里的 latest/download 换成带版本号的路径
-  # releases/download/v4.0.1/container-autoupdate.sh
+  okfile "$T" || { echo "ERR 三个源都没拿到可用的脚本，本轮不更新" >&2; exit 1; }
+  sh "$T" --compose myapp
 
 USAGE
 }
@@ -287,7 +276,6 @@ parse_args() {
                       DPANEL_DOCKER_ENV="$2"; shift 2 ;;
       --dry-run)      DRY_RUN=1; shift ;;
       -h|--help)      usage; exit 0 ;;
-      -V|--version)   echo "$VERSION"; exit 0 ;;
       *)              echo "ERR 未知参数：$1（用 --help 查看用法）" >&"$ERR_FD"; exit 1 ;;
     esac
   done
@@ -344,7 +332,7 @@ jp_val() {
 #   成功 —— 容器检查 {"upgrade":..,"status":"latest"|"upgrade"}；
 #           容器升级 {"containerId":"..."} —— 两者都**没有 code 字段**；
 #   失败 —— {"code":500,"error":"url: /dpanel/api/..."}。
-# （历史：v2.0.0 时 Compose 也交给 DPanel，`compose:deploy` 对未登记的项目同样是
+# （历史：Compose 也曾交给 DPanel，`compose:deploy` 对未登记的项目同样是
 #   rc=0 + {"code":500,...}，成功形状是 {"name":"项目名"}、没有 code。规则一致。）
 # 所以判定必须是「code >= 400 或 status=failed 或有 error 文本才算失败」，
 # 绝不能写成「code 不等于 200 就是失败」——那会把没有 code 的成功当失败。
@@ -632,8 +620,8 @@ _img_repo() {
 #   3) 没有任何容器引用（含已停止的、含 DPanel 的 `<容器名>-bak-<时间戳>` 备份容器）。
 #      删除用不带 -f 的 `docker rmi`，真有引用时它自己会拒绝，这是最后一道保险。
 #
-# v5.0.0 起**不再保留回滚点**：`up -d` 成功之后，本轮淘汰下来的旧镜像全部回收。
-# v4.1.0 曾保留「更新前在用的那个」当回滚点，但那样稳态下每个 Compose 项目永远
+# **不保留回滚点**：`up -d` 成功之后，本轮淘汰下来的旧镜像全部回收。
+# 把「更新前在用的那个」留作回滚点的话，稳态下每个 Compose 项目永远
 # 躺着一个 <none>，与「别堆积」的目标自相矛盾。代价是 Compose 模式不能再靠
 # `docker tag <旧镜像ID>` 回退 —— 要回退只能把 compose 文件里的 tag 钉回旧版本再跑一轮。
 compose_reclaim() {
@@ -814,7 +802,7 @@ fi
 
 # 每次真实运行都在日志里留一行版本号：排查历史问题时，能立刻看出那一轮
 # 跑的是哪一版脚本（升级过 latest 之后尤其重要）。
-log "container-autoupdate v$VERSION 启动"
+log "container-autoupdate 启动"
 
 # 目标判定（依赖检查与后面的分支都要用）
 _GOAL=""

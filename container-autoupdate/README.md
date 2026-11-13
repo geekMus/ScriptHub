@@ -2,7 +2,7 @@
 
 给 **DPanel 计划任务**用的容器 / Compose 自动更新脚本。单文件，跑一次检查一轮就结束，频率交给 DPanel。
 
-> 这里是核心脚本的快照（v5.0.1）。完整文档和发布包在上游：<https://github.com/geekMus/container-autoupdate>
+脚本没有版本号、不做缓存：每次触发都从本仓库拉最新的一份来跑，拉不到就报错退出，不拿旧副本凑合。
 
 ## 用法
 
@@ -24,14 +24,25 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 
 ## 装进 DPanel 计划任务
 
-新建计划任务，脚本框填两行（建议按小时跑，超时 600 秒）：
+新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）：
 
 ```sh
-G=https://github.com/geekMus/container-autoupdate/releases/latest/download/container-autoupdate.sh
-curl -fsSL --max-time 30 "$G" -o /tmp/container-autoupdate.sh && sh /tmp/container-autoupdate.sh --compose myapp
+G=https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
+SRC='https://gh-proxy.com
+https://ghfast.top
+https://github.com'
+T=/tmp/ct-new.sh
+okfile() { [ -f "$1" ] || return 1; [ "$(wc -c <"$1")" -gt 1000 ] && sh -n "$1" 2>/dev/null && grep -q container-autoupdate "$1"; }
+for u in $SRC; do
+  case "$u" in "https://github.com") url=$G ;; *) url="$u/$G" ;; esac
+  curl -fsSL --max-time 30 "$url" -o "$T" 2>/dev/null || continue
+  okfile "$T" && break
+done
+okfile "$T" || { echo "ERR 三个源都没拿到可用的脚本，本轮不更新" >&2; exit 1; }
+sh "$T" --compose myapp
 ```
 
-官方地址抓不到（网络不稳、镜像站返回 HTML）时，把上一轮成功下载的副本放在 `/tmp/container-autoupdate.sh` 继续用，或在 [retry](../retry/) 外面套重试。
+`SRC` 的顺序是 gh-proxy 镜像 → ghfast 镜像 → 直连，第一个通过校验（大小 + `sh -n` + 内容标记）的生效。三个都不通就退出，不更新，也不会留下半截文件。
 
 ## 退出码
 

@@ -233,10 +233,11 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
   #   只从一个地方拉：github.mus.pp.ua（自家 GitHub 加速）。地址要写完整，
   #   把 https://raw.githubusercontent.com/... 整个拼在域名后面；拉不到就报错
-  #   退出，本轮不更新。
+  #   退出，本轮不更新。--http1.1 + --retry 是为了扛住该加速站偶发的 TLS 抖动。
   G=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh
   T=/tmp/ct-new.sh
-  curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
+  curl -fsSL --http1.1 --retry 3 --retry-delay 2 --retry-all-errors --max-time 30 "$G" -o "$T" \
+    || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
   { [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
     || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
   sh "$T" --compose myapp

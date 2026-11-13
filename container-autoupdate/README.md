@@ -29,7 +29,8 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 ```sh
 G=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh
 T=/tmp/ct-new.sh
-curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
+curl -fsSL --http1.1 --retry 3 --retry-delay 2 --retry-all-errors --max-time 30 "$G" -o "$T" \
+  || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
 { [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
   || { echo "ERR 拉到的不是可用的 container-autoupdate 脚本，本轮不更新" >&2; exit 1; }
 sh "$T" --compose myapp

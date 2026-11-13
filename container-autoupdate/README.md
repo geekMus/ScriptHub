@@ -15,17 +15,17 @@ Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已
 
 ```sh
 # 地址：远程脚本地址；本地已有文件就写路径
-path="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 # 参数：全部写在一个变量里，写目标（--compose 或 --container）
 ARGS="--compose myapp"
 
 # 远程地址：下载一次再执行
-curl -fsSL "$path" -o /tmp/container-autoupdate.sh \
+curl -fsSL "$URL" -o /tmp/container-autoupdate.sh \
   || { echo "ERR 拉取脚本失败" >&2; exit 1; }
 sh /tmp/container-autoupdate.sh $ARGS
 
 # 本地路径：直接执行
-sh "$path" $ARGS
+sh "$URL" $ARGS
 ```
 
 - `ARGS` 里必须且只能给一个目标：`--compose <项目名>` 或 `--container <容器名>`。

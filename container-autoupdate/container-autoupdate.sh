@@ -269,16 +269,16 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
   # 填进 DPanel 计划任务的「脚本」框：只有两个变量要改。
-  path="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+  URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
   ARGS="--compose myapp"
 
   # 远程地址：下载一次再执行
-  curl -fsSL "$path" -o /tmp/container-autoupdate.sh \
+  curl -fsSL "$URL" -o /tmp/container-autoupdate.sh \
     || { echo "ERR 拉取脚本失败" >&2; exit 1; }
   sh /tmp/container-autoupdate.sh $ARGS
 
   # 本地路径：直接执行
-  sh "$path" $ARGS
+  sh "$URL" $ARGS
 
 USAGE
 }

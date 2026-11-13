@@ -16,14 +16,16 @@ URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/dpanel-update/dpan
 # 参数：全部写在一个变量里；不传就用默认值（dpanel / dpanel:lite / bridge）
 ARGS="--network DockerBridge --ip 172.20.0.15"
 
-# 远程地址：下载一次再执行
+# 远程地址：下载一次再执行；$@ 透传调用方额外参数
 curl -fsSL "$URL" -o /tmp/dpanel-update.sh \
   || { echo "ERR 拉取脚本失败" >&2; exit 1; }
-sh /tmp/dpanel-update.sh $ARGS
+sh /tmp/dpanel-update.sh $ARGS "$@"
 
 # 本地路径：直接执行
-sh "$URL" $ARGS
+sh "$URL" $ARGS "$@"
 ```
+
+`ARGS` 是固定参数，末尾的 `"$@"` 把调用本脚本时收到的额外参数原样透传给核心脚本。同名选项以后出现的为准，所以 `sh update-dpanel.sh --force` 可以覆盖 `ARGS` 里的默认值；直接放进 DPanel / OpenWrt 计划任务、不传额外参数时，`"$@"` 为空，行为不变。
 
 文章里的环境是自定义网络 `DockerBridge` + 固定 IP `172.20.0.15`；这两个默认**没有**写死，默认网络是 `bridge`、静态 IP 为空。需要和文章一致时，像上面那样显式传 `--network DockerBridge --ip 172.20.0.15`。
 

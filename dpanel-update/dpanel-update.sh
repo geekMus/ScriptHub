@@ -45,6 +45,8 @@ dpanel-update.sh — 重建 DPanel 容器，保留网络/静态 IP
     用户自定义网络（bridge/host/none 不支持固定 IP）。
   - 数据目录挂到 /dpanel，另固定挂载 /mnt 和 /var/run/docker.sock。
   - 拉取镜像失败返回 75，可套 retry.sh；其它错误返回 1。
+  - 选项按出现顺序解析；同名选项后出现的覆盖前面的，便于外层
+    wrapper 用 "$@" 覆盖默认值。
 EOF
 }
 

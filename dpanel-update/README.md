@@ -8,24 +8,44 @@
 
 ## 用法
 
-只有两个变量：脚本地址（远程或本地都行）和一段参数。
+只有两个变量：脚本地址和一段参数。远程脚本用下面的 wrapper；本地已有脚本时直接执行。
+
+把下面的内容保存成 wrapper 脚本（例如 `/root/update-dpanel.txt`，名字随意，能用 `sh` 执行即可）：
 
 ```sh
-# 地址：远程脚本地址；本地已有文件就写路径
+#!/bin/sh
+# ============================================================
+# update-dpanel.txt — 拉取 ScriptHub 的 dpanel-update.sh 并执行
+#
+# 用法: sh /root/update-dpanel.txt [额外参数]
+# 额外参数追加在 ARGS 后面，同名选项可覆盖 ARGS。
+# ============================================================
+
+# 地址：远程脚本地址
 URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/dpanel-update/dpanel-update.sh"
 # 参数：全部写在一个变量里；不传就用默认值（dpanel / dpanel:lite / bridge）
 ARGS="--network DockerBridge --ip 172.20.0.15"
 
-# 远程地址：下载一次再执行；$@ 透传调用方额外参数
+# 下载一次再执行；$@ 透传调用方额外参数
 curl -fsSL "$URL" -o /tmp/dpanel-update.sh \
   || { echo "ERR 拉取脚本失败" >&2; exit 1; }
-sh /tmp/dpanel-update.sh $ARGS "$@"
-
-# 本地路径：直接执行
-sh "$URL" $ARGS "$@"
+exec sh /tmp/dpanel-update.sh $ARGS "$@"
 ```
 
-`ARGS` 是固定参数，末尾的 `"$@"` 把调用本脚本时收到的额外参数原样透传给核心脚本。同名选项以后出现的为准，所以 `sh update-dpanel.sh --force` 可以覆盖 `ARGS` 里的默认值；直接放进 DPanel / OpenWrt 计划任务、不传额外参数时，`"$@"` 为空，行为不变。
+调用：
+
+```sh
+sh /root/update-dpanel.txt
+sh /root/update-dpanel.txt --force
+```
+
+`ARGS` 是固定参数，末尾的 `"$@"` 把调用 wrapper 时收到的额外参数原样透传给核心脚本。同名选项以后出现的为准，所以 `--force` 可以覆盖 `ARGS` 里的默认值；直接放进 DPanel / OpenWrt 计划任务、不传额外参数时，`"$@"` 为空，行为不变。
+
+本地已有 `dpanel-update.sh` 时，不用下载，直接：
+
+```sh
+sh /path/to/dpanel-update.sh $ARGS "$@"
+```
 
 文章里的环境是自定义网络 `DockerBridge` + 固定 IP `172.20.0.15`；这两个默认**没有**写死，默认网络是 `bridge`、静态 IP 为空。需要和文章一致时，像上面那样显式传 `--network DockerBridge --ip 172.20.0.15`。
 

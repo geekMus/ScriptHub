@@ -27,7 +27,7 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）：
 
 ```sh
-G=https://github.mus.pp.ua/https://github.com/geekMus/ScriptHub/raw/refs/heads/main/container-autoupdate/container-autoupdate.sh
+G=https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh
 T=/tmp/ct-new.sh
 curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更新" >&2; exit 1; }
 { [ "$(wc -c <"$T")" -gt 1000 ] && sh -n "$T" 2>/dev/null && grep -q container-autoupdate "$T"; } \
@@ -35,7 +35,7 @@ curl -fsSL --max-time 30 "$G" -o "$T" || { echo "ERR 拉取失败，本轮不更
 sh "$T" --compose myapp
 ```
 
-只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://github.com/...` 整个拼在它后面），不备其他镜像；拉不到就退出、这一轮不更新，也不会留下半截文件。
+只走 `github.mus.pp.ua` 这一个加速站（地址要把 `https://raw.githubusercontent.com/...` 整个拼在它后面，用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像；拉不到就退出、这一轮不更新，也不会留下半截文件。
 
 ## 退出码
 

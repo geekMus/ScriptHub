@@ -15,43 +15,26 @@
 
 ## 用法
 
-把下面整段填进需要重试的位置（DPanel 计划任务的「脚本」框、Lucky 规则脚本等），换掉两个地址即可：
+把下面整段填进需要重试的位置（DPanel 计划任务的「脚本」框、Lucky 规则脚本等）。只有四个变量要改：
 
 ```sh
-# 两个地址（换镜像就改这两行；要写 raw.githubusercontent.com 的完整地址）
+# 1) 重试脚本地址
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+# 2) 目标：远程地址或本地脚本路径都行
+TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+# 3) 重试脚本自己的参数（-n 次数、-i 间隔、-d 下载超时、-x 执行超时）
+RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
+# 4) 目标脚本的参数，按空格写；不需要就留空
+TARGET_ARGS="--compose myapp"
 
-# 执行参数（按需改）
-RETRY_N=3                 # 最多执行几次
-RETRY_INTERVAL=2          # 两次之间等几秒
-DOWNLOAD_TIMEOUT=20       # 下载目标脚本的超时（秒，0 = 不限）
-EXEC_TIMEOUT=150          # 单次执行的超时（秒，0 = 不限）
-TARGET_ARGS="--compose myapp"   # 目标脚本自己的参数，按空格写
-
-R=/tmp/retry.sh
-curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
+curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
   || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n "$RETRY_N" -i "$RETRY_INTERVAL" -d "$DOWNLOAD_TIMEOUT" -x "$EXEC_TIMEOUT" \
-  -u "$TARGET_URL" -- $TARGET_ARGS
+sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
 ```
 
-`TARGET_ARGS` 故意不加引号：按空格拆成多个参数传给目标脚本；目标脚本不需要参数就留空。
-
-### 跑本地脚本
-
-脚本已经在机器上（或者自己下载好了）就不加 `-u`，用 `--` 把 retry 自己的参数和执行命令分开：
-
-```sh
-RETRY_N=3
-RETRY_INTERVAL=2
-EXEC_TIMEOUT=150
-TARGET_CMD="sh /opt/backup.sh /data"   # 按空格拆成命令 + 参数
-
-sh retry.sh -n "$RETRY_N" -i "$RETRY_INTERVAL" -x "$EXEC_TIMEOUT" -- $TARGET_CMD
-```
-
-命令自身的参数以 `-` 开头时一定要写 `--`，否则会被 retry 当成自己的参数吃掉；命令不以 `-` 开头时可以省略 `--`，第一个非选项参数就是命令。本地模式用不上 `-d`（下载超时）。
+- `TARGET` 以 `http://` / `https://` 开头：只下载一次、校验语法后反复执行；写本地路径（如 `/opt/backup.sh`）就直接用 `sh` 执行，不下载。
+- `RETRY_ARGS`、`TARGET_ARGS` 故意不加引号：按空格拆成多个参数；不用的项留空即可。
+- 想直接跑本地命令也可以：`sh retry.sh -n 3 -- sh /opt/backup.sh`。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
@@ -59,13 +42,14 @@ sh retry.sh -n "$RETRY_N" -i "$RETRY_INTERVAL" -x "$EXEC_TIMEOUT" -- $TARGET_CMD
 | `-i` | 2 | 两次之间等几秒 |
 | `-q` | 关 | 不打印每次尝试的进度，只留最终结果 |
 | `-r` | `75` | 可重试退出码，逗号分隔；`124`/`137` 永远算可重试 |
-| `-d` | 0 | 下载超时秒数（0 = 不限）；>0 时给 `curl` 加 `--max-time` |
+| `-d` | 0 | 下载超时秒数（0 = 不限）；>0 时给 `curl` 加 `--max-time`；只对远程目标有效 |
 | `-x` | 0 | 执行超时秒数（0 = 不限）；>0 时整个执行过程跑在独立进程组里，到点先 TERM 整组、2 秒后 KILL |
-| `-u` / `--url` | 空 | 远程脚本地址：**下载一次**，校验语法后反复执行 |
+| `-t` / `--target` | 空 | 目标脚本：远程地址（**下载一次**）或本地脚本路径（直接执行） |
+| `-u` / `--url` | 空 | `-t` 的旧名字，保留兼容 |
 
-不给 `-u` 时执行的是 `--` 后面的本地命令；给了 `-u` 时 `--` 后面的是传给远程脚本的参数。
+不给 `-t` 时执行的是 `--` 后面的本地命令；给了 `-t` 时 `--` 后面的是传给目标脚本的参数。
 
-**下载只做一次**：`-u` 模式下第一次下载成功后就固定用这份临时文件，后面每次重试都是「重新执行」，不会再产生下载流量，也不会出现「同一个地址两次下到不同内容」。
+**下载只做一次**：`-t` 指向远程地址时，第一次下载成功后就固定用这份临时文件，后面每次重试都是「重新执行」，不会再产生下载流量，也不会出现「同一个地址两次下到不同内容」。
 
 下载阶段本身失败（连不上、超时、语法不对）可按 `-n` 重试；全部失败返回 `75`。
 

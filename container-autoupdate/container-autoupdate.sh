@@ -268,26 +268,17 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   # Compose 项目的目录通常是自动认出来的；要显式指定也可以：
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
-  # 推荐：整段填进 DPanel 计划任务的「脚本」框
-  #   两个地址（换镜像只改这两行；要写 raw.githubusercontent.com 的完整地址）。
-  #   执行参数也放在变量里，按需改。
+  # 推荐：整段填进 DPanel 计划任务的「脚本」框。只有四个变量要改。
   #   重试交给 retry.sh，超时按阶段给：拉 retry.sh 30 秒、下载目标脚本 20 秒、
   #   执行 150 秒；脚本里不写 --max-time。--http1.1 是为了扛偶发的 TLS 抖动。
   RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
-  TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+  TARGET="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+  RETRY_ARGS="-n 3 -i 2 -d 20 -x 150"
+  TARGET_ARGS="--compose myapp"
 
-  TARGET_MODE="--compose"   # 或 --container
-  TARGET_NAME="myapp"
-  RETRY_N=3
-  RETRY_INTERVAL=2
-  DOWNLOAD_TIMEOUT=20
-  EXEC_TIMEOUT=150
-
-  R=/tmp/retry.sh
-  curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
+  curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o /tmp/retry.sh \
     || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-  sh "$R" -n "$RETRY_N" -i "$RETRY_INTERVAL" -d "$DOWNLOAD_TIMEOUT" -x "$EXEC_TIMEOUT" \
-    -u "$TARGET_URL" -- "$TARGET_MODE" "$TARGET_NAME"
+  sh /tmp/retry.sh $RETRY_ARGS -t "$TARGET" -- $TARGET_ARGS
 
 USAGE
 }

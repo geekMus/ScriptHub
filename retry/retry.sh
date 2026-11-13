@@ -15,9 +15,9 @@
 #
 # 用法：
 #   retry.sh [-n 次数] [-i 间隔秒] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时]
-#            -- <命令> [参数...]
+#            -t <目标> [--] [参数...]
 #   retry.sh [-n 次数] [-i 间隔秒] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时]
-#            -u <URL> [--] [参数...]
+#            -- <命令> [参数...]
 #
 #   -n  最多执行几次（默认 3）
 #   -i  两次之间等几秒（默认 2）
@@ -27,10 +27,11 @@
 #   -x  执行阶段超时秒数（默认 0 = 不限）：到点先给**整个进程组**发 TERM（目标脚本
 #      有机会打印原因、自己选退出码），2 秒后再 KILL 整组；同时把 RETRY_TIMEOUT=<秒>
 #      写进环境变量，目标脚本可以据此提前收手
-#   -u  远程脚本地址：**只下载一次**，校验语法后反复执行；重试不再重新下载
+#   -t  目标脚本：http(s):// 等带 :// 的地址 → **只下载一次**，校验语法后反复执行；
+#       其它值当本地脚本路径，直接用 sh 执行（不下载）。-u 是它的旧名字。
 #
-#   -u 模式下，下载失败（连不上、超时、语法不对）本身可按 -n 重试；一旦下载
-#   成功，之后的执行重试就只用本地这份文件，不会再产生下载流量。
+#   -t 指向远程地址时，下载失败（连不上、超时、语法不对）本身可按 -n 重试；
+#   一旦下载成功，之后的执行重试就只用本地这份文件，不会再产生下载流量。
 #
 # 退出码：0 成功；不可重试的失败 → 立即返回该退出码；重试耗尽 → 最后一次的
 # 退出码；被外部 TERM/INT 打断 → 124（收掉整组，不再重试）；参数写错 2。
@@ -41,12 +42,14 @@ I=2
 QUIET=0
 D=0
 X=0
-URL=""
+TARGET=""
+IS_REMOTE=0
 RETRY="75"
 
 usage() {
-    echo "用法: retry.sh [-n 次数] [-i 间隔] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时] -- <命令> [参数...]" >&2
-    echo "      retry.sh [-n 次数] [-i 间隔] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时] -u <URL> [--] [参数...]" >&2
+    echo "用法: retry.sh [-n 次数] [-i 间隔] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时] -t <目标> [--] [参数...]" >&2
+    echo "      retry.sh [-n 次数] [-i 间隔] [-q] [-r 可重试码] [-d 下载超时] [-x 执行超时] -- <命令> [参数...]" >&2
+    echo "      -t <目标>：远程地址（下载一次）或本地脚本路径（直接执行）；-u 是旧名字" >&2
 }
 
 say() { [ "${QUIET}" -eq 1 ] || echo "$*" >&2; }
@@ -64,8 +67,8 @@ while [ $# -gt 0 ]; do
         -r) [ $# -ge 2 ] || { echo "retry.sh: -r 缺少值" >&2; exit 2; }
             RETRY="$2"; shift 2 ;;
         -q) QUIET=1; shift ;;
-        -u|--url) [ $# -ge 2 ] || { echo "retry.sh: -u 缺少 URL" >&2; exit 2; }
-            URL="$2"; shift 2; break ;;
+        -t|--target|-u|--url) [ $# -ge 2 ] || { echo "retry.sh: -t 缺少目标" >&2; exit 2; }
+            TARGET="$2"; shift 2; break ;;
         --) shift; break ;;
         -h|--help) sed -n '2,/^# =====/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) break ;;
@@ -85,18 +88,32 @@ num -i "${I}" zero
 num -d "${D}" zero
 num -x "${X}" zero
 
-# -u 之后允许再写一个 -- 作为“以下是给目标脚本的参数”的分隔符，剥掉它
-if [ -n "${URL}" ] && [ "${1:-}" = "--" ]; then
+# -t 之后允许再写一个 -- 作为“以下是给目标脚本的参数”的分隔符，剥掉它
+if [ -n "${TARGET}" ] && [ "${1:-}" = "--" ]; then
     shift
 fi
 
-if [ -z "${URL}" ] && [ $# -eq 0 ]; then
+if [ -z "${TARGET}" ] && [ $# -eq 0 ]; then
     usage
     exit 2
 fi
 
-if [ -n "${URL}" ] && ! command -v curl >/dev/null 2>&1; then
-    echo "retry.sh: -u 模式需要 curl" >&2
+# 目标带 :// 就算远程（下载一次）；其余当本地脚本路径（直接执行，不下载）
+if [ -n "${TARGET}" ]; then
+    case "${TARGET}" in
+        http://*|https://*) IS_REMOTE=1 ;;
+        *)                  IS_REMOTE=0 ;;
+    esac
+fi
+
+# 本地目标先确认文件存在：路径写错属于配置错误（2），重试没有意义
+if [ -n "${TARGET}" ] && [ "${IS_REMOTE}" -eq 0 ] && [ ! -f "${TARGET}" ]; then
+    echo "retry.sh: 本地目标不存在：${TARGET}" >&2
+    exit 2
+fi
+
+if [ "${IS_REMOTE}" -eq 1 ] && ! command -v curl >/dev/null 2>&1; then
+    echo "retry.sh: -t 指向远程地址时需要 curl" >&2
     exit 2
 fi
 
@@ -204,14 +221,15 @@ run_once() {
 }
 
 TMP=""
-if [ -n "${URL}" ]; then
+RUN_FILE=""
+if [ "${IS_REMOTE}" -eq 1 ]; then
     # ---- 阶段一：下载（只在这一阶段会重复下载）----
     T=1
     while :; do
-        say "▶ 第 ${T}/${N} 次: 下载 ${URL}${CT:+（超时 ${D}s）}"
+        say "▶ 第 ${T}/${N} 次: 下载 ${TARGET}${CT:+（超时 ${D}s）}"
         TMP=$(mktemp 2>/dev/null || echo "/tmp/retry.$$")
         DL_OK=0
-        if curl -fsSL --http1.1 ${CT} "${URL}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
+        if curl -fsSL --http1.1 ${CT} "${TARGET}" -o "${TMP}" 2>/dev/null && [ -s "${TMP}" ]; then
             if sh -n "${TMP}" 2>/dev/null; then
                 DL_OK=1
             else
@@ -236,14 +254,20 @@ if [ -n "${URL}" ]; then
         T=$((T + 1))
     done
     say "✔ 已下载并通过语法校验（后面重试只用这份，不再重新下载）"
+    RUN_FILE="${TMP}"
+fi
+
+# 本地目标直接执行原文件；远程目标执行下载下来的临时文件
+if [ "${IS_REMOTE}" -eq 0 ] && [ -n "${TARGET}" ]; then
+    RUN_FILE="${TARGET}"
 fi
 
 # ---- 阶段二：执行（不重复下载）----
 T=1
 while :; do
-    if [ -n "${URL}" ]; then
-        say "▶ 第 ${T}/${N} 次执行: sh ${TMP} $*"
-        run_once sh "${TMP}" "$@"
+    if [ -n "${RUN_FILE}" ]; then
+        say "▶ 第 ${T}/${N} 次执行: sh ${RUN_FILE} $*"
+        run_once sh "${RUN_FILE}" "$@"
     else
         say "▶ 第 ${T}/${N} 次执行: $*"
         run_once "$@"

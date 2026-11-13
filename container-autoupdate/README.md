@@ -24,19 +24,19 @@ Compose 分支更新成功后会回收“本项目、已无标签、无引用”
 
 ## 装进 DPanel 计划任务
 
-新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）。重试交给 `retry.sh`，超时交给 DPanel，脚本里不写超时：
+新建计划任务，把下面整段填进「脚本」框（建议每 2 小时跑一次，超时 600 秒）。重试交给 `retry.sh`，超时按阶段给（拉 retry.sh 30 秒 / 下载目标脚本 20 秒 / 执行 150 秒），三层叠加 3 轮约 514 秒，压得住 600 秒：
 
 ```sh
 R=/tmp/retry.sh
-curl -fsSL --http1.1 \
+curl -fsSL --http1.1 --max-time 30 \
   "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
   -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n 3 -i 2 \
+sh "$R" -n 3 -i 2 -d 20 -x 150 \
   -u "https://github.mus.pp.ua/https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
   -- --compose myapp
 ```
 
-两个脚本都写**完整地址**：重试脚本一个 URL、目标脚本一个 URL，中间不拼变量、不写相对路径。只走 `github.mus.pp.ua` 这一个加速站（把它放在最前面，后面接完整的 `https://raw.githubusercontent.com/...`；用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像。每轮由 `retry.sh` 重新下载、`sh -n` 校验后再执行；下载失败或脚本非 0 退出都算这一轮失败，最多 3 次。
+两个脚本都写**完整地址**：重试脚本一个 URL、目标脚本一个 URL，中间不拼变量、不写相对路径。只走 `github.mus.pp.ua` 这一个加速站（把它放在最前面，后面接完整的 `https://raw.githubusercontent.com/...`；用 `raw.githubusercontent.com` 而不是 `github.com/.../raw/`——后者在这个加速站上会缓存旧版本），不备其他镜像。每轮由 `retry.sh` 重新下载、`sh -n` 校验后再执行；下载失败、超时或脚本非 0 退出都算这一轮失败，最多 3 次。
 
 ## 退出码
 

@@ -15,25 +15,20 @@
 
 ## 用法
 
-只有两个变量：脚本地址（远程或本地都行）和一段参数。
+只有两个变量：目标脚本地址（远程或本地都行）和一段参数。`retry.sh` 用本地这一份（从仓库下载或直接用仓库里的文件）。
 
 ```sh
-# 地址：远程脚本地址；本地已有文件就写路径
-ADDR="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
+# 地址：目标脚本的远程地址，或本地脚本路径；这里留空，按需填
+ADDR=""
 # 参数：全部写在一个变量里
 ARGS="-n 3 -i 2 -d 20 -x 150"
 
-# 远程地址：下载一次再执行
-curl -fsSL --http1.1 --max-time 30 "$ADDR" -o /tmp/retry.sh \
-  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
-sh /tmp/retry.sh $ARGS -- sh /opt/backup.sh
-
-# 本地路径：直接执行
-sh "$ADDR" $ARGS -- sh /opt/backup.sh
+sh retry.sh $ARGS -t "$ADDR"
 ```
 
-- 远程地址只下载一次，之后每次重试都是重新执行，不会重复下载。
+- `ADDR` 是占位：填远程地址或本地路径后再跑；留空时 retry 按参数错误退出（退出码 2）。
 - `$ARGS` 故意不加引号：按空格拆成多个参数；不需要的项留空即可。
+- 远程地址只下载一次，之后每次重试都是重新执行，不会重复下载。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |

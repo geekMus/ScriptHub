@@ -20,8 +20,9 @@
 sh retry.sh -n 3 -i 2 -- sh /opt/backup.sh /data
 
 # 跑远程脚本：只下载一次，然后反复执行（重试不再重新下载）
-sh retry.sh -n 3 -i 2 -d 20 -x 150 \
-  -u https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh \
+# 远程脚本地址（换镜像只改这一行；要写 raw.githubusercontent.com 的完整地址）
+TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+sh retry.sh -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" \
   -- --compose magpie_gateway
 ```
 

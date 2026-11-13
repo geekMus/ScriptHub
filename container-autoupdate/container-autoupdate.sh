@@ -267,16 +267,19 @@ UPD_COMPOSE / UPD_CONTAINER 指定。优先级：命令行 > 环境变量 > 配�
   container-autoupdate.sh --compose myapp --compose-dir /opt/myapp
 
   # 推荐：整段填进 DPanel 计划任务的「脚本」框
-  #   两个脚本都写完整地址（完整的 https://raw.githubusercontent.com/... 地址），
-  #   不拼接变量。重试交给 retry.sh（最多 3 次），超时交给 DPanel 自己的计划任务
-  #   超时（600 秒），脚本里不写 --max-time。--http1.1 是为了扛偶发的 TLS 抖动。
+  #   两个地址抽成变量：想换镜像 / 自建 CDN 只改这两行，下面的命令不用动。
+  #   重试交给 retry.sh（最多 3 次），超时按阶段给：拉 retry.sh 30 秒、
+  #   下载目标脚本 20 秒、执行 150 秒；脚本里不写 --max-time。
+  #   --http1.1 是为了扛偶发的 TLS 抖动。
+  # retry.sh 本身（引导脚本）
+  RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
+  # 本脚本（container-autoupdate.sh）
+  TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
+
   R=/tmp/retry.sh
-  curl -fsSL --http1.1 \
-    "https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh" \
-    -o "$R" || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-  sh "$R" -n 3 -i 2 \
-    -u "https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh" \
-    -- --compose myapp
+  curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
+    || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
+  sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
 
 USAGE
 }

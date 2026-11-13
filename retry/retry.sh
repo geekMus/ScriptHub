@@ -30,10 +30,13 @@ URL=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -n) N="$2"; shift 2 ;;
-        -i) I="$2"; shift 2 ;;
+        -n) [ $# -ge 2 ] || { echo "retry.sh: -n 缺少值" >&2; exit 2; }
+            N="$2"; shift 2 ;;
+        -i) [ $# -ge 2 ] || { echo "retry.sh: -i 缺少值" >&2; exit 2; }
+            I="$2"; shift 2 ;;
         -q) QUIET=1; shift ;;
-        -u|--url) URL="$2"; shift 2; break ;;
+        -u|--url) [ $# -ge 2 ] || { echo "retry.sh: -u 缺少 URL" >&2; exit 2; }
+            URL="$2"; shift 2; break ;;
         --) shift; break ;;
         -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) break ;;

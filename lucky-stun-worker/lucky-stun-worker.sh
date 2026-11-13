@@ -41,16 +41,20 @@ DRY_RUN=0
 # Lucky 调用时会把 ${port} 整个替换成实际端口；命令行用 --port 覆盖
 PORT="${port}"
 
+# 每个带值的选项都先确认后面确实跟着一个参数：busybox ash 的 `shift 2` 在参数
+# 不足时不会报错、也不会真正前移，会在这里变成死循环（N1 实测）。
+need() { [ "$1" -ge 2 ] || { echo "❌ 参数 ${2} 后面缺少值（--help 看用法）" >&2; exit 1; }; }
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --token)     TOKEN="$2"; shift 2 ;;
-        --account)   ACCOUNT="$2"; shift 2 ;;
-        --domain)    DOMAIN="$2"; shift 2 ;;
-        --suffix)    SUFFIX="$2"; shift 2 ;;
-        --port)      PORT="$2"; shift 2 ;;
-        --worker)    WORKER="$2"; shift 2 ;;
-        --v6-suffix) V6S="$2"; shift 2 ;;
-        --v6-port)   V6P="$2"; shift 2 ;;
+        --token)     need $# "$1"; TOKEN="$2"; shift 2 ;;
+        --account)   need $# "$1"; ACCOUNT="$2"; shift 2 ;;
+        --domain)    need $# "$1"; DOMAIN="$2"; shift 2 ;;
+        --suffix)    need $# "$1"; SUFFIX="$2"; shift 2 ;;
+        --port)      need $# "$1"; PORT="$2"; shift 2 ;;
+        --worker)    need $# "$1"; WORKER="$2"; shift 2 ;;
+        --v6-suffix) need $# "$1"; V6S="$2"; shift 2 ;;
+        --v6-port)   need $# "$1"; V6P="$2"; shift 2 ;;
         --dry-run)   DRY_RUN=1; shift ;;
         -h|--help)   sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "未知参数：$1（--help 看用法）" >&2; exit 1 ;;

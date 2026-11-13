@@ -75,7 +75,7 @@ sh /app/conf/retry.sh -n 3 -i 1 -- sh /app/conf/lucky-stun-worker.sh \
   --token "..." --account "..." --domain mus.pp.ua --suffix rt.mus.pp.ua --port "${port}"
 ```
 
-Lucky 对每轮脚本有 **15 秒硬超时**，超时直接 `SIGKILL`（日志里是 `调用脚本失败：signal: killed`）。本脚本单次请求设了 `--connect-timeout 2 --max-time 5`，套 3 次重试仍能落在窗口内。
+Lucky 对每轮脚本有 **15 秒硬超时**，超时直接 `SIGKILL`（日志里是 `调用脚本失败：signal: killed`）。本脚本单次请求最长约 5 秒（`--connect-timeout 2 --max-time 5`），所以套重试时用 `-n 2 -i 1`（约 11 秒）才稳；`-n 3 -i 1` 约 17 秒，已经超过窗口。
 
 ## Cloudflare 侧要准备的
 

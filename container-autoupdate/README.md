@@ -9,7 +9,7 @@
 
 Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已无标签、无容器引用）；容器分支不动镜像。同一目标只挂一个计划任务（脚本内部不加锁）。
 
-## 用法（推荐：远程脚本）
+## 用法
 
 把下面整段填进 DPanel 计划任务的「脚本」框（建议每 2 小时一次、超时 600 秒）：
 
@@ -18,28 +18,24 @@ Compose 分支在部署成功后会回收本项目淘汰下来的旧镜像（已
 RETRY_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/retry/retry.sh"
 TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
 
+# 执行参数（按需改）
+TARGET_MODE="--compose"   # 或 --container
+TARGET_NAME="myapp"
+RETRY_N=3                 # 最多执行几次
+RETRY_INTERVAL=2          # 两次之间等几秒
+DOWNLOAD_TIMEOUT=20       # 下载目标脚本的超时（秒）
+EXEC_TIMEOUT=150          # 单次执行的超时（秒）
+
 R=/tmp/retry.sh
 curl -fsSL --http1.1 --max-time 30 "$RETRY_URL" -o "$R" \
   || { echo "ERR 拉取 retry.sh 失败" >&2; exit 1; }
-sh "$R" -n 3 -i 2 -d 20 -x 150 -u "$TARGET_URL" -- --compose myapp
+sh "$R" -n "$RETRY_N" -i "$RETRY_INTERVAL" -d "$DOWNLOAD_TIMEOUT" -x "$EXEC_TIMEOUT" \
+  -u "$TARGET_URL" -- "$TARGET_MODE" "$TARGET_NAME"
 ```
 
 - 目标脚本只下载一次、校验语法后反复执行；只有 `75`（和 124/137）才重试，参数错/目录错第一轮就结束。
 - `retry.sh` 用 `RETRY_TIMEOUT` 告诉脚本执行上限，脚本据此把整轮预算压到 135 秒并留 15 秒收尾，不会在拉镜像途中被外部 KILL。
 - 最坏约 540 秒，压得住 DPanel 的 600 秒；慢网络下「拉完但没时间 up -d」会用 `75` 收手，下一轮 pull 是空操作。
-
-### 或者先下载、本地运行
-
-```sh
-# 地址（换镜像只改这一行）
-TARGET_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/container-autoupdate/container-autoupdate.sh"
-curl -fsSL --http1.1 --max-time 30 "$TARGET_URL" -o /tmp/container-autoupdate.sh
-
-sh /tmp/container-autoupdate.sh --compose myapp      # 更新 Compose 项目
-sh /tmp/container-autoupdate.sh --container myapp    # 更新单个容器
-```
-
-本地方式没有重试和预算保护，适合手动执行。
 
 ## 参数
 

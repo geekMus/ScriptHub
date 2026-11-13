@@ -2,7 +2,7 @@
 
 把 Lucky STUN 打洞得到的公网端口写进 Cloudflare Worker。单文件、每次执行只部署一次、用退出码说话。
 
-## 用法（推荐：远程脚本）
+## 用法
 
 Lucky 每次端口变化只会调一次脚本，所以在 STUN 穿透规则的「脚本」栏里直接拉最新版来跑：
 
@@ -10,31 +10,22 @@ Lucky 每次端口变化只会调一次脚本，所以在 STUN 穿透规则的�
 # 脚本地址（换镜像只改这一行；要写 raw.githubusercontent.com 的完整地址）
 WORKER_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
 
+# 执行参数（按需改）
+CF_TOKEN="$CF_WORKER_API_TOKEN"
+CF_ACCOUNT="$CF_ACCOUNT_ID"
+DOMAIN="example.com"
+SUFFIX="rt.example.com"
+PORT="${port}"            # Lucky 的占位符，不用改
+WORKER="stun-redirect"
+
 R=/tmp/lucky-stun-worker.sh
 curl -fsSL --http1.1 --max-time 3 "$WORKER_URL" -o "$R" \
-  || { echo "ERR 拉取脚本失败" >&2; exit 75; }
-sh "$R" --token "$CF_WORKER_API_TOKEN" --account "$CF_ACCOUNT_ID" \
-  --domain example.com --suffix rt.example.com --port "${port}"
+  || { echo "ERR 拉取脚本失败" >&2; exit 1; }
+sh "$R" --token "$CF_TOKEN" --account "$CF_ACCOUNT" \
+  --domain "$DOMAIN" --suffix "$SUFFIX" --port "$PORT" --worker "$WORKER"
 ```
 
-`${port}` 是 Lucky 的占位符；`example.com` / `rt.example.com` 换成自己的域名。Lucky 每轮只有 **15 秒**：拉脚本与部署一般合计 2–6 秒，够用。
-
-想多一次重试，就把 `sh "$R" ...` 换成 `retry.sh -n 2 -i 1 -x 3 -- sh "$R" ...`（Lucky 容器里要先有 `retry.sh`；只有 `75` 会重试）。
-
-### 或者先下载、本地运行
-
-把脚本放进 Lucky 容器（宿主 `/root/lucky/conf/` 就是容器里的 `/app/conf/`，本来就挂载着），之后调本地路径，不必每次联网取脚本：
-
-```sh
-# 地址（换镜像只改这一行）
-WORKER_URL="https://raw.githubusercontent.com/geekMus/ScriptHub/main/lucky-stun-worker/lucky-stun-worker.sh"
-curl -fsSL --http1.1 --max-time 30 "$WORKER_URL" -o lucky-stun-worker.sh
-install -m 0755 lucky-stun-worker.sh /root/lucky/conf/lucky-stun-worker.sh
-
-# STUN 规则脚本栏：
-sh /app/conf/lucky-stun-worker.sh --token "..." --account "..." \
-  --domain example.com --suffix rt.example.com --port "${port}"
-```
+`PORT` 里写的是 Lucky 的占位符 `${port}`，运行前会替换成实际端口；`example.com` / `rt.example.com` 换成自己的域名。Lucky 每轮只有 **15 秒**：拉脚本与部署一般合计 2–6 秒，够用。
 
 ## 参数
 

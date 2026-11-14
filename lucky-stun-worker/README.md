@@ -21,6 +21,8 @@ sh /tmp/lucky-stun-worker.sh $ARGS
 sh "$URL" $ARGS
 ```
 
+部署成功的最后一行是 `✓ 部署成功 *.rt.example.com:12345（2s）`。那个 `*` 表示「任意子域名」：访问 `a.example.com` 会被 307 到 `a.rt.example.com:12345`，访问 `xyz.example.com` 就到 `xyz.rt.example.com:12345`，只有访问裸域名 `example.com` 才直接跳 `rt.example.com:12345`。所以 CF 上要解析的是 `*.rt.example.com`（或具体那个子域），不是 `rt.example.com` 本身。
+
 `ARGS` 里的 `${port}` 是 Lucky 的占位符，运行前会替换成实际端口；`example.com` / `rt.example.com` 换成自己的域名。Lucky 每轮只有 **15 秒**：拉脚本与部署一般合计 2–6 秒，够用。
 
 ## 参数

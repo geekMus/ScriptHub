@@ -263,8 +263,8 @@ EOF
 if [ "${DRY_RUN}" -eq 1 ]; then
     echo "worker   : ${WORKER}"
     echo "domain   : ${DOMAIN}"
-    echo "ipv4     : ${SUFFIX}:${PORT}"
-    echo "ipv6     : ${V6S}:${V6P}"
+    echo "ipv4     : *.${SUFFIX}:${PORT}"
+    echo "ipv6     : *.${V6S}:${V6P}"
     echo "code size: $(printf '%s' "${WORKER_CODE}" | wc -c) bytes"
     exit 0
 fi
@@ -293,7 +293,7 @@ HTTP=$(printf '%s\n' "${RESP}" | tail -n1)
 BODY=$(printf '%s\n' "${RESP}" | sed '$d')
 
 if printf '%s\n' "${BODY}" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-    echo "✓ 部署成功 ${SUFFIX}:${PORT}（${_dd}s）"
+    echo "✓ 部署成功 *.${SUFFIX}:${PORT}（${_dd}s）"
     exit 0
 fi
 
